@@ -1,18 +1,18 @@
 /* drivers/input/touchscreen/gt9xx.h
- * 
+ *
  * 2010 - 2013 Goodix Technology.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be a reference 
- * to you, when you are integrating the GOODiX's CTP IC into your system, 
- * but WITHOUT ANY WARRANTY; without even the implied warranty of 
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+ *
+ * This program is distributed in the hope that it will be a reference
+ * to you, when you are integrating the GOODiX's CTP IC into your system,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- * 
+ *
  */
 
 #ifndef _GOODIX_GT9XX_H
@@ -34,11 +34,11 @@
 //#define I2C_M_NO_RD_ACK		0x0800	/* if I2C_FUNC_PROTOCOL_MANGLING */
 //#define I2C_M_RECV_LEN		0x0400	/* length will be first received byte */
 
-/* 表示读数据 */ 
-#define I2C_M_RD		0x0001	
+/* 表示读数据 */
+#define I2C_M_RD		0x0001
  /*
  * 存储I2C通讯的信息
- * @addr：  从设备的I2C设备地址	
+ * @addr：  从设备的I2C设备地址
  * @flags: 控制标志
  * @len：  读写数据的长度
  * @buf：  存储读写数据的指针
@@ -50,7 +50,7 @@ struct i2c_msg {
 	uint8_t *buf;		/*存储读写数据的指针	*/
 };
 
-/** 
+/**
   * @brief 触摸屏参数
   */
 typedef struct
@@ -63,7 +63,7 @@ typedef struct
 
 }TOUCH_PARAM_TypeDef;
 
-typedef enum 
+typedef enum
 {
 	GT9157=0,
 	GT911=1,
@@ -71,9 +71,11 @@ typedef enum
 	GT917S=3,
   GT615=4,
   GT1151QM=5,
-  
+
   TOUCH_TYPE_NUM /* TOUCH芯片类型总数 */
 }TOUCH_IC;
+
+void GTP_TouchProcess(void);
 
 extern TOUCH_IC touchIC;
 extern const TOUCH_PARAM_TypeDef touch_param[];
@@ -86,7 +88,7 @@ extern const TOUCH_PARAM_TypeDef touch_param[];
 //以下配置已改成数组，在c文件中
 //*************************** PART2:TODO define **********************************
 
-// TODO: define your own default or for Sensor_ID == 0 config here. 
+// TODO: define your own default or for Sensor_ID == 0 config here.
 // The predefined one is just a sample config, which is not suitable for your tp in most cases.
 // 5寸屏GT9157驱动配置
 //#define CTP_CFG_GT9157 {\
@@ -148,7 +150,7 @@ extern const TOUCH_PARAM_TypeDef touch_param[];
 #define GTP_DRIVER_VERSION          "V2.2<2014/01/14>"
 #define GTP_I2C_NAME                "Goodix-TS"
 #define GT91XX_CONFIG_PROC_FILE     "gt9xx_config"
-#define GTP_POLL_TIME         10    
+#define GTP_POLL_TIME         10
 #define GTP_ADDR_LENGTH       2
 #define GTP_CONFIG_MIN_LENGTH 186
 #define GTP_CONFIG_MAX_LENGTH 240
@@ -162,7 +164,7 @@ extern const TOUCH_PARAM_TypeDef touch_param[];
 #define GTP_REG_MAIN_CLK                0x8020
 #define GTP_REG_CHIP_TYPE               0x8000
 #define GTP_REG_HAVE_KEY                0x804E
-#define GTP_REG_MATRIX_DRVNUM           0x8069     
+#define GTP_REG_MATRIX_DRVNUM           0x8069
 #define GTP_REG_MATRIX_SENNUM           0x806A
 #define GTP_REG_COMMAND				0x8040
 
@@ -209,7 +211,7 @@ extern const TOUCH_PARAM_TypeDef touch_param[];
 #define TRIGGER_LOC           8
 
 #define CFG_GROUP_LEN(p_cfg_grp)  (sizeof(p_cfg_grp) / sizeof(p_cfg_grp[0]))
-	
+
 
 //***************************PART1:ON/OFF define*******************************
 
@@ -247,8 +249,8 @@ extern const TOUCH_PARAM_TypeDef touch_param[];
                                          printf("<<-GTP-FUNC->> Func:%s@Line:%d\n",__func__,__LINE__);\
                                        }while(0)
 
-																			 
-																			 
+
+
 #define GTP_SWAP(x, y)                 do{\
                                          typeof(x) z = x;\
                                          x = y;\

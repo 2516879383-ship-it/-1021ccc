@@ -1,9 +1,9 @@
 /**
   ******************************************************************************
-  * @file    GPIO/GPIO_EXTI/Src/stm32f4xx_it.c 
+  * @file    GPIO/GPIO_EXTI/Src/stm32f4xx_it.c
   * @author  MCD Application Team
   * @brief   Main Interrupt Service Routines.
-  *          This file provides template for all exceptions handler and 
+  *          This file provides template for all exceptions handler and
   *          peripherals interrupt service routine.
   ******************************************************************************
   * @attention
@@ -39,6 +39,7 @@
 #include "stm32f4xx_it.h"
 #include "main.h"
 #include "./touch/bsp_i2c_touch.h"
+#include "./app/app_runtime.h"
 #include "./led/bsp_led.h"
 extern void GTP_TouchProcess(void);
 /** @addtogroup STM32F7xx_HAL_Examples
@@ -157,7 +158,7 @@ void SysTick_Handler(void)
 {
   HAL_IncTick();
 }
-  
+
 
 /******************************************************************************/
 /*                 STM32F7xx Peripherals Interrupt Handlers                   */
@@ -180,13 +181,13 @@ void GTP_IRQHandler(void)
 	if(__HAL_GPIO_EXTI_GET_IT(GTP_INT_GPIO_PIN) != RESET) //确保是否产生了EXTI Line中断
 	{
 		LED2_TOGGLE;
-    GTP_TouchProcess();    
+    AppTouch_Notify();
     __HAL_GPIO_EXTI_CLEAR_IT(GTP_INT_GPIO_PIN);     //清除中断标志位
-	}  
+	}
 }
 /**
   * @}
-  */ 
+  */
 
 /**
   * @}

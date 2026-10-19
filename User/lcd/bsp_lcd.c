@@ -108,7 +108,7 @@ const LCD_PARAM_TypeDef lcd_param[LCD_TYPE_NUM]={
 };
 
 
-LCD_TypeDef cur_lcd = INCH_5;
+LCD_TypeDef cur_lcd = INCH_4_3;
 
 
 ///*根据液晶数据手册的参数配置*/

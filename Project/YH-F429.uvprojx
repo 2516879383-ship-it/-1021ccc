@@ -788,11 +788,8 @@
               <FileType>1</FileType>
               <FilePath>..\User\touch\gt9xx.c</FilePath>
             </File>
-            <File>
-              <FileName>palette.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\touch\palette.c</FilePath>
-            </File>
+            <File><FileName>app_runtime.c</FileName><FileType>1</FileType><FilePath>..\User\app\app_runtime.c</FilePath></File>
+            <File><FileName>motor_ui.c</FileName><FileType>1</FileType><FilePath>..\User\app\motor_ui.c</FilePath></File>
           </Files>
         </Group>
         <Group>

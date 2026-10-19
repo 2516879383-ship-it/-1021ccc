@@ -20,8 +20,8 @@
 #define GTP_ADDRESS                      0x28
 /* 4.3寸和5寸电容屏都用 GT1151QM 这个新触摸芯片，
    只能选择这两个屏幕当中的一个，默认选5寸电容屏（定义宏为1选中）*/
-  #define TOUCH_GT1151QM_LCD_4_3    0   //使用的是4.3寸电容屏(GT1151QM)
-  #define TOUCH_GT1151QM_LCD_5      1   //使用的是5寸电容屏(GT1151QM)
+  #define TOUCH_GT1151QM_LCD_4_3    1   //使用的是4.3寸电容屏(GT1151QM)
+  #define TOUCH_GT1151QM_LCD_5      0   //使用的是5寸电容屏(GT1151QM)
 #endif
 
 

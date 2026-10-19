@@ -260,6 +260,9 @@ void I2C_Touch_Init(void)
 #if !(SOFT_IIC)   // π”√”≤º˛IIC     
 
 
+static uint32_t transfer_timeout_ms = 1000u;
+void I2C_Touch_SetTimeout(uint32_t timeout_ms) { transfer_timeout_ms = timeout_ms; }
+
 __IO uint32_t  I2CTimeout = I2CT_LONG_TIMEOUT;   
 
 /**
@@ -273,7 +276,7 @@ __IO uint32_t  I2CTimeout = I2CT_LONG_TIMEOUT;
 uint32_t I2C_ReadBytes(uint8_t ClientAddr,uint8_t* pBuffer, uint16_t NumByteToRead)
 {
   int ret;
-  ret = HAL_I2C_Master_Receive(&I2C_Handle,ClientAddr,pBuffer,NumByteToRead,1000);
+  ret = HAL_I2C_Master_Receive(&I2C_Handle,ClientAddr,pBuffer,NumByteToRead,transfer_timeout_ms);
   
   if(ret == HAL_OK)
     return 0;
@@ -293,7 +296,7 @@ uint32_t I2C_ReadBytes(uint8_t ClientAddr,uint8_t* pBuffer, uint16_t NumByteToRe
 uint32_t I2C_WriteBytes(uint8_t ClientAddr,uint8_t* pBuffer,  uint8_t NumByteToWrite)
 {
   int ret;
-  ret = HAL_I2C_Master_Transmit(&I2C_Handle,ClientAddr,pBuffer,NumByteToWrite,1000);
+  ret = HAL_I2C_Master_Transmit(&I2C_Handle,ClientAddr,pBuffer,NumByteToWrite,transfer_timeout_ms);
   
   if(ret == HAL_OK)return 0;  
   

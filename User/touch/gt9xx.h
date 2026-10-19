@@ -76,6 +76,7 @@ typedef enum
 }TOUCH_IC;
 
 void GTP_TouchProcess(void);
+void GTP_SetRuntimeMode(void);
 
 extern TOUCH_IC touchIC;
 extern const TOUCH_PARAM_TypeDef touch_param[];

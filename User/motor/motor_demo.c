@@ -107,8 +107,32 @@ void MotorDemo_Process(MotorDemo *d, MotorService *s, uint32_t now)
         else if (result < 0) fail(d,s,s->data.last_error,now);
         break;
     case DEMO_WAIT_ZERO:
-        if (zero_speed(d,&s->data,now)) enter(d,DEMO_SEND_DISABLE,now);
+        if (zero_speed(d,&s->data,now))
+            enter(d,d->position_started ? DEMO_SEND_DISABLE : DEMO_SEND_MOVE,now);
         else if ((uint32_t)(now-d->state_ms) >= MOTOR_DEMO_STOP_TIMEOUT_MS) fail(d,s,MOTOR_ERROR_MOTION_TIMEOUT,now);
+        break;
+    case DEMO_SEND_MOVE:
+        submit(d,s,Emm_Move(s->data.address,MOTOR_DEMO_DIRECTION,MOTOR_DEMO_RPM,
+                MOTOR_DEMO_POSITION_ACCEL,MOTOR_DEMO_POSITION_PULSES),DEMO_MOVE_ACK,now);
+        if (d->state == DEMO_MOVE_ACK) {
+            d->position_started=1u; d->position_before=s->data.position_counts;
+            d->observed_position_seq=s->data.position_seq;
+        }
+        break;
+    case DEMO_MOVE_ACK:
+        result=ack(d,s,now);
+        if (result > 0) {
+            start_zero_check(d,&s->data); d->observed_status_seq=s->data.status_seq;
+            enter(d,DEMO_WAIT_POSITION,now);
+        } else if (result < 0) fail(d,s,s->data.last_error,now);
+        break;
+    case DEMO_WAIT_POSITION:
+        if (s->data.position_seq != d->observed_position_seq &&
+            s->data.position_counts != d->position_before) d->position_changed=1u;
+        if (zero_speed(d,&s->data,now) && d->position_changed && new_status(d,&s->data,now) &&
+            (s->data.status_flags & 2u)) enter(d,DEMO_SEND_STOP,now);
+        else if ((uint32_t)(now-d->state_ms) >= MOTOR_DEMO_POSITION_TIMEOUT_MS)
+            fail(d,s,MOTOR_ERROR_MOTION_TIMEOUT,now);
         break;
     case DEMO_SEND_DISABLE: submit(d,s,Emm_Enable(s->data.address,0u),DEMO_DISABLE_ACK,now); break;
     case DEMO_DISABLE_ACK:
@@ -133,6 +157,9 @@ void MotorDemo_Process(MotorDemo *d, MotorService *s, uint32_t now)
             enter(d,DEMO_FAULT_VERIFY,now);
         } break;
     case DEMO_FAULT_VERIFY: case DEMO_FAULT:
+        if (!s->data.online || (s->data.status_flags & 1u) ||
+            s->data.speed_rpm < -MOTOR_DEMO_ZERO_RPM || s->data.speed_rpm > MOTOR_DEMO_ZERO_RPM)
+            d->cleanup_confirmed=0u;
         if (zero_speed(d,&s->data,now) && new_status(d,&s->data,now) && !(s->data.status_flags & 1u)) {
             d->cleanup_confirmed=1u; enter(d,DEMO_FAULT,now);
         } else if (d->state == DEMO_FAULT_VERIFY && (uint32_t)(now-d->state_ms) >= MOTOR_DEMO_CONFIRM_MS)
@@ -147,6 +174,7 @@ const char *MotorDemo_StateName(const MotorDemo *d)
     static const char * const names[] = {
         "BOOT WAIT", "WAIT LINK", "ENABLE SEND", "ENABLE ACK", "VERIFY ENABLE",
         "SPEED SEND", "SPEED ACK", "SPEED 1000 RPM", "STOP SEND", "STOP ACK", "VERIFY ZERO",
+        "POSITION SEND", "POSITION ACK", "WAIT POSITION / 32000 PULSES",
         "DISABLE SEND", "DISABLE ACK", "VERIFY DISABLE", "DONE (queries continue)",
         "FAULT: STOP SEND", "FAULT: STOP ACK", "FAULT: DISABLE SEND", "FAULT: DISABLE ACK",
         "FAULT: VERIFY STOP", "FAULT / STOP UNCONFIRMED"

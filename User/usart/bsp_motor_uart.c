@@ -73,7 +73,7 @@ static int send(void *context, const uint8_t *data, uint8_t length)
     tx_started_ms = HAL_GetTick();
     tx_in_flight = 1u;
     if (HAL_UART_Transmit_DMA(&motor_uart, tx_bytes, length) == HAL_OK) return 1;
-    tx_in_flight = 0u; return 0;
+    tx_in_flight = 0u; ++uart_errors; restart_rx = 1u; return 0;
 }
 
 MotorTransport BspMotorUart_Init(void)

@@ -23,8 +23,10 @@ static void finish(MotorService *s, uint8_t result)
 static void received(void *context, const EmmFrame *f)
 {
     MotorService *s = (MotorService *)context;
+    int matches = s->pending && s->transmitted && f->code == s->active.code;
     ++s->data.rx_count; s->data.last_rx_ms = s->now_ms;
-    switch (f->code) {
+    /* Only the outstanding query may publish a fresh sample, not duplicate/late data. */
+    if (matches && s->query) switch (f->code) {
     case EMM_POSITION:
         s->data.position_counts = f->position; s->data.position_ms = s->now_ms;
         ++s->data.position_seq; s->data.valid |= MOTOR_VALID_POSITION; break;
@@ -37,7 +39,8 @@ static void received(void *context, const EmmFrame *f)
     default: break;
     }
     /* Async completion (9F), unrelated codes and late replies cannot acknowledge a command. */
-    if (s->pending && s->transmitted && f->code == s->active.code) {
+    if (matches) {
+        s->last_send_ms = s->now_ms;
         if (s->query) finish(s, EMM_ACK_OK);
         else if (f->result != 0x9Fu) finish(s, f->result);
     }
@@ -47,6 +50,7 @@ void MotorService_Init(MotorService *s, MotorTransport transport, uint8_t addres
 {
     memset(s, 0, sizeof(*s)); s->transport = transport; s->data.address = address;
     s->next_send_ms = now_ms; s->next_cycle_ms = now_ms;
+    s->last_send_ms = now_ms - 5u;
     EmmParser_Init(&s->parser, address);
 }
 
@@ -83,7 +87,7 @@ void MotorService_Process(MotorService *s, uint32_t now_ms)
     if (s->pending && s->transmitted) {
         if (s->waiting_tx) {
             if (!s->transport.busy(s->transport.context)) {
-                s->waiting_tx = 0u; s->sent_ms = now_ms;
+                s->waiting_tx = 0u; s->sent_ms = now_ms; s->last_send_ms = now_ms;
             } else if ((uint32_t)(now_ms - s->tx_ms) >= 20u) {
                 MotorService_TransportError(s, MOTOR_ERROR_UART, now_ms);
             }
@@ -92,7 +96,9 @@ void MotorService_Process(MotorService *s, uint32_t now_ms)
             s->parser.used = 0u;
             /* Drain late data before retrying an indistinguishable wire request. */
             s->next_send_ms = now_ms + 100u;
-            if (s->query && s->attempts < 3u) s->transmitted = 0u;
+            if (s->query && s->attempts < 3u) {
+                s->transmitted = 0u; s->requested_ms = s->next_send_ms;
+            }
             else finish(s, EMM_ACK_TIMEOUT);
         }
     }
@@ -115,7 +121,7 @@ void MotorService_Process(MotorService *s, uint32_t now_ms)
         }
     }
     if (s->pending && !s->transmitted && reached(now_ms, s->next_send_ms) &&
-        (uint32_t)(now_ms - s->requested_ms) >= 100u && s->attempts == 0u) {
+        (uint32_t)(now_ms - s->requested_ms) >= 100u) {
         MotorService_TransportError(s, MOTOR_ERROR_UART, now_ms);
     }
 }

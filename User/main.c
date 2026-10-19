@@ -22,15 +22,16 @@ int main(void)
     LCD_SetTransparency(0, 255);
     LCD_DisplayOn();
     MotorUi_Init();
+    GTP_SetRuntimeMode();
     MotorService_Init(&service, BspMotorUart_Init(), MOTOR_DEMO_ADDRESS, HAL_GetTick());
     MotorDemo_Init(&demo, HAL_GetTick());
     while (1) {
         uint32_t now = HAL_GetTick();
-        AppTouch_Process(now);
         BspMotorUart_Pump(&service, now);
         MotorService_Process(&service, now);
         MotorDemo_Process(&demo, &service, now);
-        MotorUi_Process(&service.data, MotorDemo_StateName(&demo), now);
+        AppTouch_Process(HAL_GetTick());
+        MotorUi_Process(&service.data, MotorDemo_StateName(&demo), HAL_GetTick());
     }
 }
 
@@ -43,7 +44,7 @@ static void SystemClock_Config(void)
   __HAL_RCC_PWR_CLK_ENABLE();
 
   /* 使能HSE，配置HSE为PLL的时钟源，配置PLL的各种分频因子M N P Q
-	 * PLLCLK = HSE/M*N/P = 25M / 25 *432 / 2 = 216M
+	 * PLLCLK = HSE/M*N/P = 25M / 25 *360 / 2 = 180M
 	 */
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 

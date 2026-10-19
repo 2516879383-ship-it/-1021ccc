@@ -22,6 +22,13 @@
 #include "./lcd/bsp_lcd.h"
 #include "./app/app_runtime.h"
 
+static uint8_t touch_runtime;
+void GTP_SetRuntimeMode(void)
+{
+    touch_runtime = 1u;
+    I2C_Touch_SetTimeout(3u);
+}
+
 // 5寸屏GT9157驱动配置
 uint8_t CTP_CFG_GT9157[] ={
 	0x00,0x20,0x03,0xE0,0x01,0x05,0x3C,0x00,0x01,0x08,
@@ -289,7 +296,7 @@ static int I2C_Transfer( struct i2c_msg *msgs,int num)
 		}
 	}
 	if(ret)
-		return ret;
+		return -1;
 
 	return im;   													//正常完成的传输结构个数
 }
@@ -325,7 +332,7 @@ static int32_t GTP_I2C_Read(uint8_t client_addr, uint8_t *buf, int32_t len)
     msgs[1].len   = len - GTP_ADDR_LENGTH;	//要读取的数据长度
     msgs[1].buf   = &buf[GTP_ADDR_LENGTH];	//buf[GTP_ADDR_LENGTH]之后的缓冲区存储读出的数据
 
-    while(retries < 5)
+    while(retries < (touch_runtime ? 1 : 5))
     {
         ret = I2C_Transfer( msgs, 2);					//调用IIC数据传输过程函数，有2个传输过程
         if(ret == 2)break;
@@ -364,7 +371,7 @@ static int32_t GTP_I2C_Write(uint8_t client_addr,uint8_t *buf,int32_t len)
     msg.len   = len;							//长度直接等于(寄存器地址长度+写入的数据字节数)
     msg.buf   = buf;						//直接连续写入缓冲区中的数据(包括了寄存器地址)
 
-    while(retries < 5)
+    while(retries < (touch_runtime ? 1 : 5))
     {
         ret = I2C_Transfer(&msg, 1);	//调用IIC数据传输过程函数，1个传输过程
         if (ret == 1)break;
@@ -465,6 +472,7 @@ static int16_t pre_y[GTP_MAX_TOUCH] ={-1,-1,-1,-1,-1};
 
 static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
 {
+    if (id < 0 || id >= GTP_MAX_TOUCH) return;
 
 	GTP_DEBUG_FUNC();
 
@@ -497,6 +505,7 @@ static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
   */
 static void GTP_Touch_Up( int32_t id)
 {
+    if (id < 0 || id >= GTP_MAX_TOUCH) return;
 
 
     /*处理触摸释放,用于触摸画板*/
@@ -575,6 +584,7 @@ static void Goodix_TS_Work_Func(void)
         uint8_t buf[8 * GTP_MAX_TOUCH] = {(GTP_READ_COOR_ADDR + 10) >> 8, (GTP_READ_COOR_ADDR + 10) & 0xff};
 
         ret = GTP_I2C_Read(client_addr, buf, 2 + 8 * (touch_num - 1));
+        if (ret != 2) goto exit_work_func;
         memcpy(&point_data[12], &buf[2], 8 * (touch_num - 1));			//复制其余点数的数据到point_data
     }
 

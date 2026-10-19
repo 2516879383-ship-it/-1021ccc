@@ -16,6 +16,7 @@
   */ 
   
 #include "./usart/bsp_debug_usart.h"
+#include "./usart/bsp_motor_uart.h"
 
 UART_HandleTypeDef UartHandle;
 extern uint8_t ucTemp;  
@@ -49,6 +50,8 @@ void DEBUG_USART_Config(void)
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {  
   GPIO_InitTypeDef  GPIO_InitStruct;
+  if (huart->Instance == UART5) { BspMotorUart_MspInit(huart); return; }
+  if (huart->Instance != USART1) return;
   
   DEBUG_USART_CLK_ENABLE();
 	

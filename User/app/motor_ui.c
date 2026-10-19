@@ -5,7 +5,7 @@
 #include <string.h>
 
 #define UI_ROWS 12u
-#define UI_COLS 59u
+#define UI_COLS 58u
 static char previous[UI_ROWS][UI_COLS + 1u];
 static uint32_t last_draw;
 static uint8_t first_draw;
@@ -85,8 +85,10 @@ void MotorUi_Process(const MotorSnapshot *d, const char *stage, uint32_t now_ms)
     row(7u, text);
     snprintf(text, sizeof(text), "RX:%lu TX:%lu BAD:%lu", (unsigned long)d->rx_count,
              (unsigned long)d->tx_count, (unsigned long)d->bad_frames); row(8u, text);
-    snprintf(text, sizeof(text), "ERROR: %s ACK:%02X", error_name(d->last_error),
-             (unsigned)d->command_result); row(9u, text);
+    if (d->command_seq) snprintf(text, sizeof(text), "LAST ERR: %s ACK:%02X", error_name(d->last_error),
+             (unsigned)d->command_result);
+    else snprintf(text, sizeof(text), "LAST ERR: %s ACK:--", error_name(d->last_error));
+    row(9u, text);
     if (d->rx_count) snprintf(text, sizeof(text), "UP:%lus RX AGE:%lums TIMEOUT:%lu",
         (unsigned long)(now_ms / 1000u), (unsigned long)(now_ms - d->last_rx_ms),
         (unsigned long)d->timeouts);

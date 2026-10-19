@@ -4,10 +4,11 @@
 #include "./touch/gt9xx.h"
 #include "./app/app_runtime.h"
 #include "./app/motor_ui.h"
+#include "./usart/bsp_motor_uart.h"
 
 int main(void)
 {
-    MotorSnapshot snapshot = {0};
+    static MotorService service;
     HAL_Init();
     SystemClock_Config();
     DEBUG_USART_Config();
@@ -18,11 +19,13 @@ int main(void)
     LCD_SetTransparency(0, 255);
     LCD_DisplayOn();
     MotorUi_Init();
-    snapshot.address = 1u;
+    MotorService_Init(&service, BspMotorUart_Init(), 1u, HAL_GetTick());
     while (1) {
         uint32_t now = HAL_GetTick();
         AppTouch_Process(now);
-        MotorUi_Process(&snapshot, "BASELINE / WAITING", now);
+        BspMotorUart_Pump(&service, now);
+        MotorService_Process(&service, now);
+        MotorUi_Process(&service.data, "QUERY ONLY", now);
     }
 }
 

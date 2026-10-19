@@ -52,7 +52,7 @@ void MotorService_Init(MotorService *s, MotorTransport transport, uint8_t addres
 
 int MotorService_Submit(MotorService *s, const EmmCommand *c)
 {
-    if (s->queued_valid || !c || c->length < 4u || c->length > sizeof(c->bytes) ||
+    if (s->queued_valid || (s->pending && !s->query) || !c || c->length < 4u || c->length > sizeof(c->bytes) ||
         c->bytes[0] != s->data.address) return 0;
     s->queued = *c; s->queued_valid = 1u; return 1;
 }

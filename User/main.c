@@ -5,10 +5,13 @@
 #include "./app/app_runtime.h"
 #include "./app/motor_ui.h"
 #include "./usart/bsp_motor_uart.h"
+#include "./motor/motor_demo.h"
+#include "./motor/motor_demo_config.h"
 
 int main(void)
 {
     static MotorService service;
+    static MotorDemo demo;
     HAL_Init();
     SystemClock_Config();
     DEBUG_USART_Config();
@@ -19,13 +22,15 @@ int main(void)
     LCD_SetTransparency(0, 255);
     LCD_DisplayOn();
     MotorUi_Init();
-    MotorService_Init(&service, BspMotorUart_Init(), 1u, HAL_GetTick());
+    MotorService_Init(&service, BspMotorUart_Init(), MOTOR_DEMO_ADDRESS, HAL_GetTick());
+    MotorDemo_Init(&demo, HAL_GetTick());
     while (1) {
         uint32_t now = HAL_GetTick();
         AppTouch_Process(now);
         BspMotorUart_Pump(&service, now);
         MotorService_Process(&service, now);
-        MotorUi_Process(&service.data, "QUERY ONLY", now);
+        MotorDemo_Process(&demo, &service, now);
+        MotorUi_Process(&service.data, MotorDemo_StateName(&demo), now);
     }
 }
 

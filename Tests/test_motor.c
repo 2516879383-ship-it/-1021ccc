@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "motor/motor_service.h"
+#include "motor/motor_demo.h"
+#include "motor/motor_demo_config.h"
 
 static unsigned checks;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 0; } } while (0)
@@ -9,13 +11,14 @@ typedef struct {
     unsigned sends;
     int busy, reject;
     uint8_t last[16], length;
+    unsigned by_code[256];
 } FakeTransport;
 
 static int fake_send(void *context, const uint8_t *data, uint8_t length)
 {
     FakeTransport *f = (FakeTransport *)context;
     if (f->reject) return 0;
-    memcpy(f->last, data, length); f->length = length; ++f->sends; f->busy = 1;
+    memcpy(f->last, data, length); f->length = length; ++f->sends; ++f->by_code[data[1]]; f->busy = 1;
     return 1;
 }
 static int fake_busy(void *context) { return ((FakeTransport *)context)->busy; }
@@ -133,9 +136,103 @@ static int test_service(void)
     return 1;
 }
 
+typedef struct {
+    unsigned handled;
+    int online, drop_velocity_ack, reject_enable, refuse_stop;
+    uint8_t flags;
+    int32_t rpm;
+    int64_t position;
+} SimMotor;
+
+static void sim_reply(MotorService *s, FakeTransport *f, SimMotor *m, uint32_t now)
+{
+    uint8_t b[8] = {1,0,0,0,0,0,0,0};
+    uint32_t magnitude;
+    uint8_t length = 4u;
+    if (m->handled == f->sends) return;
+    m->handled = f->sends; f->busy=0;
+    if (!m->online) return;
+    b[1]=f->last[1]; b[2]=2u;
+    switch (b[1]) {
+    case EMM_POSITION:
+        length=8u; b[2]=(uint8_t)(m->position<0);
+        magnitude=(uint32_t)(m->position<0 ? -m->position : m->position);
+        b[3]=(uint8_t)(magnitude>>24); b[4]=(uint8_t)(magnitude>>16);
+        b[5]=(uint8_t)(magnitude>>8); b[6]=(uint8_t)magnitude; break;
+    case EMM_SPEED:
+        length=6u; b[2]=(uint8_t)(m->rpm<0);
+        magnitude=(uint32_t)(m->rpm<0 ? -m->rpm : m->rpm);
+        b[3]=(uint8_t)(magnitude>>8); b[4]=(uint8_t)magnitude; break;
+    case EMM_STATUS: b[2]=m->flags; break;
+    case EMM_ENABLE:
+        if (m->reject_enable && f->last[3]) b[2]=0xE2u;
+        else m->flags=(uint8_t)((m->flags&0xFEu) | f->last[3]);
+        break;
+    case EMM_VELOCITY:
+        m->rpm=1000; m->flags &= 0xFDu;
+        if (m->drop_velocity_ack) return;
+        break;
+    case EMM_STOP:
+        if (!m->refuse_stop) { m->rpm=0; m->flags |= 2u; }
+        break;
+    default: break;
+    }
+    b[length-1u]=0x6Bu;
+    MotorService_Receive(s,b,length,now);
+}
+
+static void sim_tick(MotorService *s, FakeTransport *f, SimMotor *m, MotorDemo *d, uint32_t now)
+{
+    sim_reply(s,f,m,now);
+    MotorService_Process(s,now);
+    MotorDemo_Process(d,s,now);
+}
+
+static int test_demo(void)
+{
+    MotorService s;
+    FakeTransport f;
+    SimMotor m;
+    MotorDemo d;
+    uint32_t now;
+    init(&s,&f); memset(&m,0,sizeof(m)); m.online=1;
+    MotorDemo_Init(&d,0);
+    for(now=0;now<500;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(f.by_code[EMM_ENABLE]==0 && f.by_code[EMM_VELOCITY]==0);
+    for(;now<5000;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_DONE && m.rpm==0 && !(m.flags&1u));
+    CHECK(f.by_code[EMM_ENABLE]==2 && f.by_code[EMM_VELOCITY]==1 && f.by_code[EMM_STOP]==1);
+    CHECK(f.by_code[EMM_MOVE]==0 && d.zero_samples==3);
+    for(;now<7000;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(f.by_code[EMM_VELOCITY]==1 && d.state==DEMO_DONE);
+    init(&s,&f); memset(&m,0,sizeof(m)); MotorDemo_Init(&d,0);
+    for(now=0;now<6500;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_FAULT && !d.cleanup_confirmed && !f.by_code[EMM_VELOCITY]);
+    m.online=1;
+    for(;now<8500;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_FAULT && !f.by_code[EMM_VELOCITY]);
+    init(&s,&f); memset(&m,0,sizeof(m)); m.online=1; m.drop_velocity_ack=1; MotorDemo_Init(&d,0);
+    for(now=0;now<5000;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_FAULT && d.cleanup_confirmed && f.by_code[EMM_VELOCITY]==1);
+    CHECK(f.by_code[EMM_STOP]==1 && !(m.flags&1u));
+    init(&s,&f); memset(&m,0,sizeof(m)); m.online=1; m.reject_enable=1; MotorDemo_Init(&d,0);
+    for(now=0;now<5000;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_FAULT && d.fault==MOTOR_ERROR_REJECTED && !f.by_code[EMM_VELOCITY]);
+    init(&s,&f); memset(&m,0,sizeof(m)); m.online=1; MotorDemo_Init(&d,0);
+    for(now=0;now<5000;now++) {
+        if(d.state==DEMO_SPEED_RUN) m.flags |= 8u;
+        sim_tick(&s,&f,&m,&d,now);
+    }
+    CHECK(d.state==DEMO_FAULT && d.fault==MOTOR_ERROR_STALL && f.by_code[EMM_STOP]==1);
+    init(&s,&f); memset(&m,0,sizeof(m)); m.online=1; m.refuse_stop=1; MotorDemo_Init(&d,0);
+    for(now=0;now<8000;now++) sim_tick(&s,&f,&m,&d,now);
+    CHECK(d.state==DEMO_FAULT && d.fault==MOTOR_ERROR_MOTION_TIMEOUT && !d.cleanup_confirmed);
+    return 1;
+}
+
 int main(void)
 {
-    if (!test_protocol() || !test_service()) return 1;
-    printf("PASS: %u checks (protocol + motor service)\n", checks);
+    if (!test_protocol() || !test_service() || !test_demo()) return 1;
+    printf("PASS: %u checks (protocol + service + automatic demo)\n", checks);
     return 0;
 }

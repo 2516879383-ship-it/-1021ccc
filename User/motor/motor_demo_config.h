@@ -1,0 +1,19 @@
+#ifndef MOTOR_DEMO_CONFIG_H
+#define MOTOR_DEMO_CONFIG_H
+
+#define MOTOR_DEMO_ADDRESS             1u
+#define MOTOR_DEMO_BOOT_WAIT_MS      500u
+#define MOTOR_DEMO_LINK_TIMEOUT_MS  3000u
+#define MOTOR_DEMO_RPM              1000u
+#define MOTOR_DEMO_DIRECTION           0u /* CW, manufacturer's example */
+#define MOTOR_DEMO_SPEED_ACCEL        10u
+#define MOTOR_DEMO_SPEED_RUN_MS     1000u
+#define MOTOR_DEMO_STOP_TIMEOUT_MS  3000u
+#define MOTOR_DEMO_ZERO_RPM            5
+#define MOTOR_DEMO_ZERO_SAMPLES        3u
+#define MOTOR_DEMO_COMMAND_WAIT_MS  1000u
+#define MOTOR_DEMO_CONFIRM_MS       1000u
+#define MOTOR_DEMO_POSITION_PULSES 32000u
+#define MOTOR_DEMO_POSITION_ACCEL      0u
+#define MOTOR_DEMO_POSITION_TIMEOUT_MS 10000u
+#endif

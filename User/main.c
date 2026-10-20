@@ -27,11 +27,13 @@ int main(void)
     MotorDemo_Init(&demo, HAL_GetTick());
     while (1) {
         uint32_t now = HAL_GetTick();
+        /*
         BspMotorUart_Pump(&service, now);
         MotorService_Process(&service, now);
         MotorDemo_Process(&demo, &service, now);
         AppTouch_Process(HAL_GetTick());
         MotorUi_Process(&service.data, MotorDemo_StateName(&demo), HAL_GetTick());
+        */
     }
 }
 
@@ -43,7 +45,7 @@ static void SystemClock_Config(void)
   /* Enable Power Control clock */
   __HAL_RCC_PWR_CLK_ENABLE();
 
-  /* Ê¹ÄÜHSE£¬ÅäÖÃHSEÎªPLLµÄÊ±ÖÓÔ´£¬ÅäÖÃPLLµÄ¸÷ÖÖ·ÖÆµÒò×ÓM N P Q
+  /* Ê¹ï¿½ï¿½HSEï¿½ï¿½ï¿½ï¿½ï¿½ï¿½HSEÎªPLLï¿½ï¿½Ê±ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PLLï¿½Ä¸ï¿½ï¿½Ö·ï¿½Æµï¿½ï¿½ï¿½ï¿½M N P Q
 	 * PLLCLK = HSE/M*N/P = 25M / 25 *360 / 2 = 180M
 	 */
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
@@ -61,10 +63,10 @@ static void SystemClock_Config(void)
    while(1) {}
   }
 
-  /* ¼¤»î OverDrive Ä£Ê½ */
+  /* ï¿½ï¿½ï¿½ï¿½ OverDrive Ä£Ê½ */
   HAL_PWREx_EnableOverDrive();
 
-  /* Ñ¡ÔñPLLCLK×÷ÎªSYSCLK£¬²¢ÅäÖÃ HCLK, PCLK1 and PCLK2 µÄÊ±ÖÓ·ÖÆµÒò×Ó
+  /* Ñ¡ï¿½ï¿½PLLCLKï¿½ï¿½ÎªSYSCLKï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ HCLK, PCLK1 and PCLK2 ï¿½ï¿½Ê±ï¿½Ó·ï¿½Æµï¿½ï¿½ï¿½ï¿½
 	 * SYSCLK = PLLCLK     = 180M
 	 * HCLK   = SYSCLK / 1 = 180M
 	 * PCLK2  = SYSCLK / 2 = 90M

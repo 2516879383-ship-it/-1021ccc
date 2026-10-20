@@ -1,0 +1,545 @@
+#include "motor_bus.h"
+#include "motor_test_config.h"
+#include <string.h>
+
+enum { QUERY, CONTROL, GROUP, PREPARE, TRIGGER, STOP, DIAGNOSTIC };
+static const uint8_t codes[3] = { EMM_SPEED, EMM_POSITION, EMM_STATUS };
+static int due(uint32_t now, uint32_t deadline) { return (int32_t)(now - deadline) >= 0; }
+static uint8_t bit(uint8_t a) { return (uint8_t)(1u << (a - 1u)); }
+static int address_ok(uint8_t a) { return a >= 1u && a <= MOTOR_COUNT; }
+static int mask_ready(const MotorBus *b, uint8_t mask, uint32_t now)
+{
+    unsigned i;
+    for (i = 0u; i < MOTOR_COUNT; ++i)
+        if ((mask & (1u << i)) && !due(now, b->nodes[i].quiet_until)) return 0;
+    return 1;
+}
+int MotorBus_Fresh(const MotorNode *n, uint8_t field, uint32_t now)
+{
+    uint32_t at = field == MOTOR_VALID_POSITION ? n->data.position_ms :
+                  field == MOTOR_VALID_SPEED ? n->data.speed_ms : n->data.status_ms;
+    return (n->data.valid & field) && (uint32_t)(now - at) <= MOTOR_BUS_FRESH_MS;
+}
+const char *MotorBus_Role(uint8_t a)
+{
+    static const char *names[7] = {"FL", "FR", "RL", "RR", "ARM", "LIFT", "TRIM"};
+    return address_ok(a) ? names[a - 1u] : "?";
+}
+const char *MotorBus_ActionName(MotorActionState s)
+{
+    static const char *names[] = {"IDLE", "QUEUED", "SENT", "ACK ONLY", "EXECUTING",
+        "COMPLETE", "REJECTED", "UNKNOWN", "CANCELLED", "STOP UNCONF", "STOPPED"};
+    return (unsigned)s < sizeof(names) / sizeof(names[0]) ? names[s] : "?";
+}
+static int healthy(const MotorBus *b, uint8_t mask, uint32_t now, uint8_t enabled)
+{
+    unsigned i;
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (mask & (1u << i)) {
+        const MotorNode *n = &b->nodes[i];
+        if (!n->data.online || !MotorBus_Fresh(n, MOTOR_VALID_STATUS, now) ||
+            (n->data.status_flags & 0x0Cu) || (enabled && !(n->data.status_flags & 1u)) ||
+            n->action == MOTOR_STOP_PENDING || n->action == MOTOR_UNKNOWN) return 0;
+    }
+    return 1;
+}
+static uint32_t new_id(MotorBus *b) { if (!++b->next_id) ++b->next_id; return b->next_id; }
+static void state(MotorBus *b, uint8_t mask, MotorActionState s, uint32_t id, uint32_t now)
+{
+    unsigned i;
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (mask & (1u << i)) {
+        b->nodes[i].action = s; b->nodes[i].request_id = id; b->nodes[i].action_ms = now;
+    }
+}
+static void sync_fail(MotorBus *b)
+{
+    b->sync_locked = 1u; b->sync_state = MOTOR_SYNC_LOCKED;
+    b->message = "SYNC CACHE UNKNOWN / LOCKED";
+}
+void MotorBus_Init(MotorBus *b, MotorTransport t, uint32_t now)
+{
+    unsigned i, j;
+    memset(b, 0, sizeof(*b)); b->transport = t;
+    b->now_ms = b->started_ms = b->last_step_ms = now;
+    b->next_send_ms = b->next_wheel_ms = now;
+    b->sync_locked = (uint8_t)!MOTOR_SYNC_CLEAN_BOOT_CONFIRMED;
+    b->sync_state = b->sync_locked ? MOTOR_SYNC_LOCKED : MOTOR_SYNC_IDLE;
+    b->message = "READ ONLY";
+    EmmParser_Init(&b->parser, 0u);
+    for (i = 0u; i < MOTOR_COUNT; ++i) {
+        b->nodes[i].data.address = (uint8_t)(i + 1u); b->nodes[i].quiet_until = now;
+        for (j = 0u; j < 3u; ++j) b->nodes[i].poll_due[j] = now + (i * 3u + j) * 24u;
+    }
+}
+static int action_ok(const MotorAction *a)
+{
+    const EmmCommand *c;
+    uint16_t rpm;
+    if (!a) return 0;
+    c = &a->command;
+    if (!address_ok(c->bytes[0]) || c->bytes[1] != c->code || c->bytes[2] > 1u) return 0;
+    rpm = (uint16_t)(((uint16_t)c->bytes[3] << 8) | c->bytes[4]);
+    if (rpm > 3000u) return 0;
+    if (c->code == EMM_VELOCITY) return c->length == 8u && c->bytes[6] <= 1u &&
+        c->bytes[7] == 0x6Bu && a->lease_ms >= 100u && a->lease_ms <= 5000u;
+    if (c->code == EMM_MOVE) return c->length == 13u && c->bytes[10] <= 2u &&
+        c->bytes[11] <= 1u && c->bytes[12] == 0x6Bu && a->pulses_per_rev > 0u &&
+        a->pulses_per_rev <= 1000000u && a->timeout_ms >= 100u && a->timeout_ms <= 60000u;
+    return 0;
+}
+static int set_target(MotorNode *n, const MotorAction *a, uint32_t now)
+{
+    const uint8_t *c = a->command.bytes;
+    uint32_t pulses;
+    int64_t delta;
+    if (a->command.code == EMM_VELOCITY) {
+        n->target_rpm = ((int32_t)c[3] << 8) | c[4];
+        if (c[2]) n->target_rpm = -n->target_rpm;
+        n->target_known = n->previous_known = 0u; return 1;
+    }
+    pulses = ((uint32_t)c[6] << 24) | ((uint32_t)c[7] << 16) | ((uint32_t)c[8] << 8) | c[9];
+    delta = (int64_t)pulses * 65536 / a->pulses_per_rev;
+    if (c[2]) delta = -delta;
+    if (c[10] == EMM_REL_TARGET && !n->previous_known) return 0;
+    if (c[10] == EMM_REL_ACTUAL && !MotorBus_Fresh(n, MOTOR_VALID_POSITION, now)) return 0;
+    n->target_counts = delta + (c[10] == EMM_REL_TARGET ? n->previous_target :
+        c[10] == EMM_REL_ACTUAL ? n->data.position_counts : 0);
+    /* Feedback wire magnitude is 32 bits. Reject targets outside observable range. */
+    if (n->target_counts < -INT64_C(4294967295) || n->target_counts > INT64_C(4294967295)) return 0;
+    n->target_known = 1u; return 1;
+}
+static int enqueue(MotorBus *b, MotorRequest r, uint32_t now)
+{
+    unsigned i;
+    if (!b->manual || b->queue_count == MOTOR_BUS_QUEUE || b->sync_state == MOTOR_SYNC_PREPARE ||
+        b->sync_state == MOTOR_SYNC_TRIGGER || b->sync_state == MOTOR_SYNC_VERIFY ||
+        (b->stop_mask & r.mask)) { b->message = "BUSY / MANUAL REQUIRED"; return 0; }
+    for (i = 0u; i < b->queue_count; ++i) if (b->queue[i].mask & r.mask) return 0;
+    if ((b->pending && b->active.kind != QUERY && b->active.kind != DIAGNOSTIC &&
+        (b->active.mask & r.mask)) || (b->wheels_pending && (r.mask & MOTOR_WHEELS))) return 0;
+    r.id = new_id(b); r.expires_ms = now + (r.code == EMM_VELOCITY ? r.action.lease_ms : 1000u);
+    b->queue[b->queue_count++] = r;
+    state(b, r.mask, MOTOR_QUEUED, r.id, now); b->message = "QUEUED"; return 1;
+}
+int MotorBus_Enable(MotorBus *b, uint8_t a, uint8_t enabled, uint32_t now)
+{
+    MotorRequest r;
+    if (!address_ok(a) || enabled > 1u || !healthy(b, bit(a), now, 0u)) {
+        b->message = "NEED FRESH HEALTHY STATUS"; return 0;
+    }
+    memset(&r, 0, sizeof(r)); r.action.command = Emm_Enable(a, enabled);
+    r.address = a; r.code = EMM_ENABLE; r.mask = bit(a); r.kind = CONTROL;
+    return enqueue(b, r, now);
+}
+int MotorBus_Submit(MotorBus *b, const MotorAction *a, uint32_t now)
+{
+    MotorRequest r;
+    uint8_t addr;
+    if (!action_ok(a)) { b->message = "INVALID MOTION PARAMETERS"; return 0; }
+    addr = a->command.bytes[0];
+    if (a->command.bytes[a->command.length - 2u] || !healthy(b, bit(addr), now, 1u) ||
+        b->nodes[addr - 1u].motion) { b->message = "NEED IDLE ENABLED HEALTHY AXIS"; return 0; }
+    memset(&r, 0, sizeof(r)); r.action = *a;
+    r.address = addr; r.code = a->command.code; r.mask = bit(addr); r.kind = CONTROL;
+    return enqueue(b, r, now);
+}
+int MotorBus_Wheels(MotorBus *b, const int32_t rpm[4], uint8_t acc, uint32_t lease, uint32_t now)
+{
+    MotorRequest r;
+    unsigned i;
+    memset(&r, 0, sizeof(r));
+    if (!b->manual || lease < 100u || lease > 5000u || !Emm_Wheels(&r.action.command, rpm, acc) ||
+        !healthy(b, MOTOR_WHEELS, now, 1u) || (b->stop_mask & MOTOR_WHEELS) ||
+        b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER ||
+        b->sync_state == MOTOR_SYNC_VERIFY) { b->message = "WHEELS NOT READY"; return 0; }
+    for (i = 0u; i < b->queue_count; ++i) if (b->queue[i].mask & MOTOR_WHEELS) return 0;
+    if (b->pending && b->active.kind == CONTROL && (b->active.mask & MOTOR_WHEELS)) return 0;
+    if (b->wheels_pending) state(b, MOTOR_WHEELS, MOTOR_CANCELLED, b->wheels.id, now);
+    r.mask = MOTOR_WHEELS; r.address = 1u; r.code = EMM_VELOCITY; r.kind = GROUP;
+    r.id = new_id(b); r.action.lease_ms = lease; r.expires_ms = now + lease;
+    b->wheels = r; b->wheels_pending = 1u; b->group_id = r.id; b->group_ack = 0u;
+    /* A new pending vector does not extend the already running vector's lease. */
+    b->message = "WHEELS QUEUED"; return 1;
+}
+int MotorBus_Sync(MotorBus *b, const MotorAction *a, uint8_t count, uint32_t now)
+{
+    unsigned i;
+    uint8_t mask = 0u;
+    if (!b->manual || b->sync_locked || !a || !count || count > MOTOR_COUNT || b->queue_count ||
+        b->wheels_pending || b->stop_mask || b->sync_state == MOTOR_SYNC_PREPARE ||
+        b->sync_state == MOTOR_SYNC_TRIGGER || b->sync_state == MOTOR_SYNC_VERIFY) {
+        b->message = "SYNC LOCKED / BUSY"; return 0;
+    }
+    for (i = 0u; i < count; ++i) {
+        uint8_t addr = a[i].command.bytes[0];
+        if (!action_ok(&a[i]) || (mask & bit(addr)) || !healthy(b, bit(addr), now, 1u) ||
+            b->nodes[addr - 1u].motion || a[i].command.bytes[a[i].command.length - 2u] != 1u) return 0;
+        mask |= bit(addr);
+    }
+    /* Do not prepare while any unrelated action is moving, even outside the mask. */
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (b->nodes[i].motion) return 0;
+    memcpy(b->sync, a, count * sizeof(*a)); b->sync_count = count; b->sync_index = 0u;
+    b->sync_mask = mask; b->sync_id = new_id(b); b->sync_deadline = now + 3000u;
+    b->sync_state = MOTOR_SYNC_PREPARE;
+    state(b, mask, MOTOR_QUEUED, b->sync_id, now); b->message = "SYNC PREPARE"; return 1;
+}
+void MotorBus_Stop(MotorBus *b, uint8_t mask, uint32_t now)
+{
+    unsigned i, write = 0u;
+    uint8_t interrupted_sync = 0u;
+    mask &= MOTOR_ALL;
+    if (!mask) return;
+    if (b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER ||
+        b->sync_state == MOTOR_SYNC_VERIFY) {
+        mask |= b->sync_mask; sync_fail(b); interrupted_sync = 1u;
+    }
+    for (i = 0u; i < b->queue_count; ++i) {
+        if (b->queue[i].mask & mask) state(b, b->queue[i].mask, MOTOR_CANCELLED, b->queue[i].id, now);
+        else b->queue[write++] = b->queue[i];
+    }
+    b->queue_count = (uint8_t)write;
+    if (b->wheels_pending && (mask & MOTOR_WHEELS)) { b->wheels_pending = 0u; mask |= MOTOR_WHEELS; }
+    /* Never cut a DMA frame: tx_wait remains set until hardware reports completion. */
+    if (b->pending && (b->active.kind == QUERY || b->active.kind == DIAGNOSTIC ||
+        (b->active.mask & mask))) {
+        if (b->sent) b->nodes[b->active.address - 1u].quiet_until = now + MOTOR_BUS_QUIET_MS;
+        b->pending = 0u;
+    }
+    b->stop_mask |= mask;
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (mask & (1u << i)) {
+        MotorNode *n = &b->nodes[i];
+        n->motion = 0u; n->previous_known = 0u; n->stop_sent = 0u;
+        n->action = MOTOR_STOP_PENDING; n->action_ms = now;
+        n->deadline_ms = now + MOTOR_STOP_TIMEOUT_MS;
+        n->stop_speed_seq = n->data.speed_seq; n->stop_status_seq = n->data.status_seq;
+    }
+    if (!interrupted_sync) b->message = "STOP REQUESTED / VERIFY";
+}
+void MotorBus_SetManual(MotorBus *b, uint8_t manual, uint32_t now)
+{
+    if (b->manual && !manual) MotorBus_Stop(b, MOTOR_ALL, now);
+    b->manual = (uint8_t)!!manual;
+    b->message = b->manual ? "MANUAL / SELECT ACTION" : b->stop_mask ? "READ ONLY / STOP VERIFY" : "READ ONLY";
+}
+void MotorBus_ReadVersions(MotorBus *b) { b->diagnostic_mask = MOTOR_ALL; }
+
+static void failed(MotorBus *b, uint8_t result)
+{
+    MotorRequest r = b->active;
+    unsigned i;
+    b->pending = 0u;
+    if (r.kind == QUERY || r.kind == DIAGNOSTIC) {
+        MotorNode *n = &b->nodes[r.address - 1u];
+        if (n->failures < 3u) ++n->failures;
+        n->data.last_error = MOTOR_ERROR_TIMEOUT;
+        n->failure_code = r.code; n->failure_result = result;
+        if (n->failures >= 2u) { n->data.online = 0u; n->data.valid = 0u; }
+        n->quiet_until = b->now_ms + MOTOR_BUS_QUIET_MS;
+        for (i = 0u; i < 3u; ++i) n->poll_due[i] = b->now_ms + (n->failures >= 2u ? 2000u : 500u);
+        if (n->motion) MotorBus_Stop(b, (uint8_t)(r.mask & MOTOR_WHEELS ? MOTOR_WHEELS : r.mask), b->now_ms);
+        return;
+    }
+    if (r.kind == STOP) {
+        MotorNode *n = &b->nodes[r.address - 1u];
+        n->data.command_code = r.code; n->data.command_result = result; ++n->data.command_seq;
+        n->data.last_error = result == EMM_ACK_TIMEOUT ? MOTOR_ERROR_TIMEOUT : MOTOR_ERROR_REJECTED;
+        n->action = MOTOR_STOP_PENDING; return;
+    }
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (r.mask & (1u << i)) {
+        MotorNode *n = &b->nodes[i];
+        n->action = result == EMM_ACK_TIMEOUT || result == EMM_ACK_TRANSPORT ? MOTOR_UNKNOWN : MOTOR_REJECTED;
+        n->data.command_code = r.code; n->data.command_result = result; ++n->data.command_seq;
+        n->data.last_error = result == 0xEEu ? MOTOR_ERROR_FORMAT :
+            result == EMM_ACK_TIMEOUT ? MOTOR_ERROR_TIMEOUT : MOTOR_ERROR_REJECTED;
+        if (result != EMM_ACK_TIMEOUT && result != EMM_ACK_TRANSPORT) ++n->rejected_commands;
+        n->previous_known = 0u;
+        n->failure_code = r.code; n->failure_result = result;
+    }
+    if (r.kind == PREPARE || r.kind == TRIGGER) sync_fail(b);
+    MotorBus_Stop(b, (uint8_t)((r.mask & MOTOR_WHEELS) ? r.mask | MOTOR_WHEELS : r.mask), b->now_ms);
+    b->message = b->sync_locked && (r.kind == PREPARE || r.kind == TRIGGER) ?
+        "SYNC CACHE UNKNOWN / LOCKED" : result == 0x12u || result == 0x22u ? "LIMIT / NO MOTION (12/22)" :
+        result == 0xE2u ? "E2 CONDITION/PARAM REJECTED" : result == 0xEEu ? "EE FORMAT REJECTED" :
+        result == EMM_ACK_TIMEOUT ? "ACK TIMEOUT / STOP VERIFY" : "TRANSPORT ERROR / STOP VERIFY";
+}
+static void begin_motion(MotorBus *b, MotorNode *n, const MotorAction *a)
+{
+    uint8_t was_moving = n->motion;
+    n->motion = 1u; n->action = MOTOR_SENT; n->action_ms = b->now_ms;
+    n->deadline_ms = b->now_ms + (a->command.code == EMM_MOVE ? a->timeout_ms : a->lease_ms);
+    n->data.command_code = a->command.code;
+    if (!was_moving) n->poll_due[0] = n->poll_due[1] = n->poll_due[2] = b->now_ms;
+}
+static void received(void *context, const EmmFrame *f)
+{
+    MotorBus *b = (MotorBus *)context;
+    MotorNode *n = &b->nodes[f->address - 1u];
+    MotorSnapshot *d = &n->data;
+    MotorRequest r;
+    uint8_t index = 0u;
+    ++b->rx_frames;
+    if (f->result == 0x9Fu) { n->last_notice = f->result; ++b->ignored_frames; return; }
+    if (!b->pending || !b->sent || f->address != b->active.address || f->code != b->active.code) {
+        ++b->ignored_frames; return;
+    }
+    r = b->active;
+    ++d->rx_count; d->last_rx_ms = b->now_ms; d->online = 1u; n->failures = 0u;
+    b->next_send_ms = b->now_ms + MOTOR_BUS_GAP_MS;
+    if (r.kind == QUERY) {
+        if (f->code == EMM_SPEED) {
+            d->speed_rpm = f->speed; d->speed_ms = b->now_ms; ++d->speed_seq; d->valid |= MOTOR_VALID_SPEED;
+        } else if (f->code == EMM_POSITION) {
+            index = 1u; d->position_counts = f->position; d->position_ms = b->now_ms;
+            ++d->position_seq; d->valid |= MOTOR_VALID_POSITION;
+        } else {
+            index = 2u; d->status_flags = f->flags; d->status_ms = b->now_ms;
+            ++d->status_seq; d->valid |= MOTOR_VALID_STATUS;
+        }
+        if (n->poll_samples[index] && b->now_ms - n->poll_last_ms[index] > n->max_poll_gap_ms[index])
+            n->max_poll_gap_ms[index] = b->now_ms - n->poll_last_ms[index];
+        n->poll_last_ms[index] = b->now_ms; ++n->poll_samples[index];
+        n->poll_due[index] = b->now_ms + (n->motion &&
+            (index == 0u || (index == 1u && d->address >= 5u)) ? 200u : 500u);
+        d->last_error = MOTOR_ERROR_NONE; b->pending = 0u; return;
+    }
+    if (r.kind == DIAGNOSTIC) {
+        n->firmware = f->firmware; n->hardware = f->hardware; n->version_valid = 1u;
+        b->pending = 0u; return;
+    }
+    if (f->result != EMM_ACK_OK) { failed(b, f->result); return; }
+    d->command_code = r.code; d->command_result = f->result; ++d->command_seq;
+    b->pending = 0u;
+    if (r.kind == STOP) return; /* Only fresh speed+status may confirm a stop. */
+    if (r.kind == GROUP) {
+        b->group_ack = f->result; b->message = "GROUP ACK1 / VERIFY EACH";
+        /* Do not mark nodes 2..4 accepted based on address 1. */
+        if (n->request_id == r.id) n->action = MOTOR_ACCEPTED;
+    } else if (r.kind == PREPARE) {
+        n->action = MOTOR_ACCEPTED; ++b->sync_index;
+        if (b->sync_index == b->sync_count) b->sync_state = MOTOR_SYNC_TRIGGER;
+    } else if (r.kind == TRIGGER) {
+        b->sync_state = MOTOR_SYNC_VERIFY; b->message = "SYNC TRIGGER ACK / VERIFY";
+    } else {
+        n->action = MOTOR_ACCEPTED; b->message = "ACK ONLY / VERIFY FEEDBACK";
+        if (r.code == EMM_MOVE) { n->previous_target = n->target_counts; n->previous_known = n->target_known; }
+    }
+}
+void MotorBus_Receive(MotorBus *b, const uint8_t *bytes, size_t count, uint32_t now)
+{ b->now_ms = now; b->rx_bytes += (uint32_t)count; EmmParser_Feed(&b->parser, bytes, count, received, b); }
+void MotorBus_TransportError(MotorBus *b, MotorError error, uint32_t now)
+{
+    unsigned i;
+    uint8_t moving = 0u;
+    b->now_ms = now; ++b->transport_errors;
+    for (i = 0u; i < MOTOR_COUNT; ++i) if (b->nodes[i].motion) moving |= (uint8_t)(1u << i);
+    if (b->pending && b->active.kind != QUERY && b->active.kind != DIAGNOSTIC) failed(b, EMM_ACK_TRANSPORT);
+    b->pending = 0u;
+    for (i = 0u; i < b->queue_count; ++i) state(b, b->queue[i].mask, MOTOR_CANCELLED, b->queue[i].id, now);
+    b->queue_count = b->wheels_pending = 0u;
+    if (b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER ||
+        b->sync_state == MOTOR_SYNC_VERIFY) { moving |= b->sync_mask; sync_fail(b); }
+    if (moving) MotorBus_Stop(b, moving, now);
+    for (i = 0u; i < MOTOR_COUNT; ++i) {
+        MotorNode *n = &b->nodes[i]; n->data.online = n->data.valid = 0u;
+        n->data.last_error = error; n->previous_known = 0u; n->quiet_until = now + MOTOR_BUS_QUIET_MS;
+    }
+    b->parser.used = 0u; b->next_send_ms = now + MOTOR_BUS_QUIET_MS;
+    b->message = "BUS ERROR / NO REPLAY";
+}
+static void monitor(MotorBus *b)
+{
+    unsigned i;
+    uint8_t fault_mask = 0u, all_done = 1u;
+    for (i = 0u; i < MOTOR_COUNT; ++i) {
+        MotorNode *n = &b->nodes[i];
+        uint32_t age = b->now_ms - n->data.last_rx_ms;
+        if (n->data.rx_count && age > n->max_age_ms) n->max_age_ms = age;
+        if (age > MOTOR_BUS_FRESH_MS) n->data.online = 0u;
+        if (n->action == MOTOR_STOP_PENDING && n->stop_sent &&
+            n->data.speed_seq != n->stop_speed_seq && n->data.status_seq != n->stop_status_seq &&
+            MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) &&
+            MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) && n->data.speed_rpm == 0 &&
+            !(n->data.status_flags & 0x0Cu)) n->action = MOTOR_STOPPED;
+        else if (n->action == MOTOR_STOP_PENDING && due(b->now_ms, n->deadline_ms)) n->action = MOTOR_UNKNOWN;
+        if (n->data.command_code == EMM_ENABLE && n->action == MOTOR_ACCEPTED) {
+            if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) &&
+                due(n->data.status_ms, n->action_ms + 1u) &&
+                (n->data.status_flags & 1u) == n->requested_enable) n->action = MOTOR_COMPLETE;
+            else if (due(b->now_ms, n->deadline_ms)) n->action = MOTOR_UNKNOWN;
+        }
+        if (!n->motion) continue;
+        if (!n->data.online || !MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) ||
+            (n->data.status_flags & 0x0Cu) || !(n->data.status_flags & 1u)) {
+            fault_mask |= (uint8_t)(1u << i); continue;
+        }
+        if (due(b->now_ms, n->deadline_ms)) {
+            n->data.last_error = MOTOR_ERROR_MOTION_TIMEOUT;
+            fault_mask |= (uint8_t)(1u << i); continue;
+        }
+        if ((b->pending && b->active.id == n->request_id) ||
+            b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER) continue;
+        if (n->data.command_code == EMM_MOVE && n->target_known &&
+            MotorBus_Fresh(n, MOTOR_VALID_POSITION, b->now_ms) &&
+            MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) &&
+            due(n->data.position_ms, n->action_ms + 1u) && due(n->data.speed_ms, n->action_ms + 1u) &&
+            due(n->data.status_ms, n->action_ms + 1u)) {
+            int64_t delta = n->data.position_counts - n->target_counts;
+            if (delta >= -(int64_t)MOTOR_POSITION_TOLERANCE_COUNTS && delta <= MOTOR_POSITION_TOLERANCE_COUNTS &&
+                n->data.speed_rpm == 0 && (n->data.status_flags & 2u)) {
+                n->motion = 0u; n->action = MOTOR_COMPLETE;
+                n->previous_target = n->target_counts; n->previous_known = 1u;
+            } else n->action = MOTOR_EXECUTING;
+        } else if (n->data.command_code == EMM_VELOCITY &&
+            MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) && due(n->data.speed_ms, n->action_ms + 1u) &&
+            n->data.speed_rpm == n->target_rpm) n->action = MOTOR_EXECUTING;
+    }
+    if (fault_mask) {
+        if (fault_mask & MOTOR_WHEELS) fault_mask |= MOTOR_WHEELS;
+        MotorBus_Stop(b, fault_mask, b->now_ms);
+    }
+    if (b->sync_state == MOTOR_SYNC_VERIFY) {
+        for (i = 0u; i < MOTOR_COUNT; ++i) if ((b->sync_mask & (1u << i)) && b->nodes[i].motion) all_done = 0u;
+        if (all_done) b->sync_state = MOTOR_SYNC_DONE;
+    }
+}
+static void activate(MotorBus *b, MotorRequest r)
+{ b->active = r; b->pending = 1u; b->sent = 0u; }
+static int choose(MotorBus *b)
+{
+    MotorRequest r;
+    unsigned i, scan;
+    memset(&r, 0, sizeof(r));
+    if (b->stop_mask) {
+        for (i = 0u; i < MOTOR_COUNT; ++i) if (b->stop_mask & (1u << i)) break;
+        r.address = (uint8_t)(i + 1u); r.mask = bit(r.address); r.code = EMM_STOP; r.kind = STOP;
+        r.id = new_id(b); r.action.command = Emm_Stop(r.address); activate(b, r); return 1;
+    }
+    if (b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER) {
+        if (due(b->now_ms, b->sync_deadline) || !healthy(b, b->sync_mask, b->now_ms, 1u)) {
+            MotorBus_Stop(b, b->sync_mask, b->now_ms); sync_fail(b); return 0;
+        }
+        if (!mask_ready(b, b->sync_mask, b->now_ms)) return 0;
+        r.id = b->sync_id;
+        if (b->sync_state == MOTOR_SYNC_PREPARE) {
+            r.action = b->sync[b->sync_index]; r.address = r.action.command.bytes[0];
+            r.mask = bit(r.address); r.code = r.action.command.code; r.kind = PREPARE;
+        } else {
+            r.action.command = Emm_SyncTrigger(); r.address = 1u; r.mask = b->sync_mask;
+            r.code = EMM_SYNC; r.kind = TRIGGER;
+        }
+        activate(b, r); return 1;
+    }
+    if (b->queue_count) {
+        r = b->queue[0];
+        if (!due(b->now_ms, b->nodes[r.address - 1u].quiet_until)) return 0;
+        --b->queue_count; memmove(b->queue, b->queue + 1, b->queue_count * sizeof(b->queue[0]));
+        if (due(b->now_ms, r.expires_ms) || !healthy(b, r.mask, b->now_ms, (uint8_t)(r.code != EMM_ENABLE))) {
+            state(b, r.mask, MOTOR_CANCELLED, r.id, b->now_ms); return 0;
+        }
+        activate(b, r); return 1;
+    }
+    if (b->wheels_pending && due(b->now_ms, b->next_wheel_ms)) {
+        if (!mask_ready(b, MOTOR_WHEELS, b->now_ms)) return 0;
+        r = b->wheels; b->wheels_pending = 0u;
+        if (due(b->now_ms, r.expires_ms) || !healthy(b, MOTOR_WHEELS, b->now_ms, 1u)) {
+            b->message = "EXPIRED WHEEL VECTOR"; return 0;
+        }
+        activate(b, r); return 1;
+    }
+    /* Stop verification runs before background polling, even for a full stop group. */
+    for (i = 0u; i < MOTOR_COUNT; ++i) {
+        MotorNode *n = &b->nodes[i];
+        unsigned j;
+        if (n->action != MOTOR_STOP_PENDING || !n->stop_sent || !due(b->now_ms, n->quiet_until)) continue;
+        for (j = 0u; j < 3u; j += 2u) if (due(b->now_ms, n->poll_due[j])) {
+            r.address = n->data.address; r.mask = bit(r.address); r.code = codes[j]; r.kind = QUERY;
+            r.action.command = Emm_Query(r.address, r.code); activate(b, r); return 1;
+        }
+    }
+    for (scan = 0u; scan < 21u; ++scan) {
+        uint8_t k = b->poll_cursor;
+        MotorNode *n = &b->nodes[k / 3u];
+        b->poll_cursor = (uint8_t)((k + 1u) % 21u);
+        if (!due(b->now_ms, n->poll_due[k % 3u]) || !due(b->now_ms, n->quiet_until)) continue;
+        r.address = n->data.address; r.mask = bit(r.address); r.code = codes[k % 3u]; r.kind = QUERY;
+        r.action.command = Emm_Query(r.address, r.code); activate(b, r); return 1;
+    }
+    if (b->diagnostic_mask) for (i = 0u; i < MOTOR_COUNT; ++i) if (b->diagnostic_mask & (1u << i)) {
+        b->diagnostic_mask &= (uint8_t)~(1u << i);
+        r.address = (uint8_t)(i + 1u); r.mask = bit(r.address); r.code = EMM_VERSION; r.kind = DIAGNOSTIC;
+        r.action.command = Emm_Query(r.address, r.code); activate(b, r); return 1;
+    }
+    return 0;
+}
+void MotorBus_Process(MotorBus *b, uint32_t now)
+{
+    MotorRequest *r = &b->active;
+    unsigned i;
+    b->now_ms = now;
+    if (now - b->last_step_ms > b->max_step_ms) b->max_step_ms = now - b->last_step_ms;
+    b->last_step_ms = now;
+    if (b->tx_wait) {
+        if (!b->transport.busy(b->transport.context)) {
+            b->tx_wait = 0u; b->reply_ms = now; b->next_send_ms = now + MOTOR_BUS_GAP_MS;
+        } else if (now - b->tx_ms >= b->tx_limit_ms) {
+            /* BSP owns abort/recovery; never reuse a still-busy DMA buffer here. */
+            MotorBus_TransportError(b, MOTOR_ERROR_UART, now); b->tx_ms = now;
+        }
+    }
+    if (b->pending && b->sent && !b->tx_wait && now - b->reply_ms >= MOTOR_BUS_REPLY_MS) {
+        ++b->timeout_count; ++b->nodes[r->address - 1u].data.timeouts;
+        b->nodes[r->address - 1u].quiet_until = now + MOTOR_BUS_QUIET_MS;
+        b->parser.used = 0u; failed(b, EMM_ACK_TIMEOUT);
+    }
+    monitor(b);
+    if (b->tx_wait || b->transport.busy(b->transport.context) || !due(now, b->next_send_ms)) return;
+    if (!b->pending && !choose(b)) return;
+    if (b->sent) return;
+    r = &b->active;
+    if ((r->kind == CONTROL || r->kind == GROUP) && due(now, r->expires_ms)) {
+        state(b, r->mask, MOTOR_CANCELLED, r->id, now); b->pending = 0u;
+        b->message = "REQUEST EXPIRED / NOT SENT"; return;
+    }
+    if ((r->kind == CONTROL || r->kind == GROUP || r->kind == PREPARE || r->kind == TRIGGER) &&
+        !healthy(b, r->mask, now, (uint8_t)(r->code != EMM_ENABLE))) { failed(b, 0xE2u); return; }
+    if ((r->kind == CONTROL && r->code != EMM_ENABLE) || r->kind == PREPARE) {
+        if (!set_target(&b->nodes[r->address - 1u], &r->action, now)) { failed(b, 0xE2u); return; }
+    }
+    if (b->transport.send(b->transport.context, r->action.command.bytes, r->action.command.length)) {
+        ++b->tx_frames; b->tx_bytes += r->action.command.length;
+        b->sent = b->tx_wait = 1u; b->tx_ms = now;
+        b->tx_limit_ms = 20u + ((uint32_t)r->action.command.length * 10000u + 115199u) / 115200u;
+        ++b->nodes[r->address - 1u].data.tx_count;
+        if (r->kind == STOP) {
+            MotorNode *n = &b->nodes[r->address - 1u];
+            b->stop_mask &= (uint8_t)~r->mask; n->stop_sent = 1u; n->action_ms = now;
+            n->stop_speed_seq = n->data.speed_seq; n->stop_status_seq = n->data.status_seq;
+            n->poll_due[0] = n->poll_due[2] = now;
+        } else if (r->kind == GROUP) {
+            b->next_wheel_ms = now + 100u;
+            for (i = 0u; i < 4u; ++i) {
+                MotorAction a = r->action;
+                a.command = Emm_VelocityEx((uint8_t)(i + 1u), r->action.command.bytes[6u + i * 8u],
+                    (uint16_t)(((uint16_t)r->action.command.bytes[7u + i * 8u] << 8) |
+                    r->action.command.bytes[8u + i * 8u]), r->action.command.bytes[9u + i * 8u], 0u);
+                (void)set_target(&b->nodes[i], &a, now); begin_motion(b, &b->nodes[i], &a);
+                b->nodes[i].request_id = r->id; b->nodes[i].deadline_ms = r->expires_ms;
+            }
+        } else if (r->kind == TRIGGER) {
+            for (i = 0u; i < b->sync_count; ++i) {
+                MotorNode *n = &b->nodes[b->sync[i].command.bytes[0] - 1u];
+                begin_motion(b, n, &b->sync[i]);
+                if (n->target_known) { n->previous_target = n->target_counts; n->previous_known = 1u; }
+            }
+        } else if (r->kind == CONTROL && r->code != EMM_ENABLE) {
+            begin_motion(b, &b->nodes[r->address - 1u], &r->action);
+            if (r->code == EMM_VELOCITY) b->nodes[r->address - 1u].deadline_ms = r->expires_ms;
+        } else if (r->kind != QUERY && r->kind != DIAGNOSTIC) {
+            b->nodes[r->address - 1u].action = MOTOR_SENT;
+            if (r->code == EMM_ENABLE) {
+                MotorNode *n = &b->nodes[r->address - 1u];
+                n->data.command_code = r->code; n->requested_enable = r->action.command.bytes[3];
+                n->action_ms = now; n->deadline_ms = now + 3000u; n->poll_due[2] = now;
+            }
+        }
+    } else if (now - b->next_send_ms >= 100u) MotorBus_TransportError(b, MOTOR_ERROR_UART, now);
+}

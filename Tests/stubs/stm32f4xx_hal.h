@@ -8,24 +8,35 @@ typedef struct { uint32_t count; } DMA_Stream_TypeDef;
 typedef struct { unsigned unused; } GPIO_TypeDef;
 extern USART_TypeDef fake_usart1, fake_usart3, fake_uart5;
 extern DMA_Stream_TypeDef fake_stream1;
+extern DMA_Stream_TypeDef fake_stream0, fake_stream7;
 extern GPIO_TypeDef fake_gpiob;
+extern GPIO_TypeDef fake_gpioc, fake_gpiod;
 #define USART1 (&fake_usart1)
 #define USART3 (&fake_usart3)
 #define UART5 (&fake_uart5)
 #define GPIOB (&fake_gpiob)
+#define GPIOC (&fake_gpioc)
+#define GPIOD (&fake_gpiod)
 #define DMA1_Stream1 (&fake_stream1)
+#define DMA1_Stream0 (&fake_stream0)
+#define DMA1_Stream7 (&fake_stream7)
 typedef struct {
     uint32_t Channel, Direction, PeriphInc, MemInc, PeriphDataAlignment, MemDataAlignment;
     uint32_t Mode, Priority, FIFOMode;
 } DMA_InitTypeDef;
 typedef struct { DMA_Stream_TypeDef *Instance; DMA_InitTypeDef Init; unsigned State; void *Parent; } DMA_HandleTypeDef;
 typedef struct { uint32_t BaudRate, WordLength, StopBits, Parity, Mode, HwFlowCtl, OverSampling; } UART_InitTypeDef;
-typedef struct { USART_TypeDef *Instance; UART_InitTypeDef Init; DMA_HandleTypeDef *hdmarx; } UART_HandleTypeDef;
+typedef struct { USART_TypeDef *Instance; UART_InitTypeDef Init; DMA_HandleTypeDef *hdmarx, *hdmatx; uint32_t gState; } UART_HandleTypeDef;
 typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define HAL_DMA_STATE_READY 1u
 #define HAL_DMA_STATE_BUSY 2u
 #define DMA_CHANNEL_4 4u
 #define DMA_PERIPH_TO_MEMORY 0u
+#define DMA_MEMORY_TO_PERIPH 1u
+#define DMA_NORMAL 0u
+#define DMA_PRIORITY_HIGH 2u
+#define HAL_UART_STATE_READY 0u
+#define HAL_UART_STATE_BUSY_TX 1u
 #define DMA_PINC_DISABLE 0u
 #define DMA_MINC_ENABLE 1u
 #define DMA_PDATAALIGN_BYTE 0u
@@ -36,6 +47,7 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define GPIO_PIN_10 (1u << 10)
 #define GPIO_PIN_11 (1u << 11)
 #define GPIO_PIN_12 (1u << 12)
+#define GPIO_PIN_2 (1u << 2)
 #define GPIO_MODE_AF_PP 2u
 #define GPIO_MODE_OUTPUT_PP 1u
 #define GPIO_PULLUP 1u
@@ -43,6 +55,7 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define GPIO_SPEED_FREQ_LOW 0u
 #define GPIO_SPEED_FREQ_VERY_HIGH 3u
 #define GPIO_AF7_USART3 7u
+#define GPIO_AF8_UART5 8u
 #define GPIO_PIN_RESET 0u
 #define GPIO_PIN_SET 1u
 #define UART_WORDLENGTH_8B 0u
@@ -61,6 +74,12 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define UART_IT_PE 64u
 #define USART3_IRQn 39u
 #define DMA1_Stream1_IRQn 12u
+#define DMA1_Stream0_IRQn 11u
+#define DMA1_Stream7_IRQn 17u
+#define UART5_IRQn 53u
+#define __HAL_RCC_UART5_CLK_ENABLE() ((void)0)
+#define __HAL_RCC_GPIOC_CLK_ENABLE() ((void)0)
+#define __HAL_RCC_GPIOD_CLK_ENABLE() ((void)0)
 #define __HAL_RCC_USART3_CLK_ENABLE() ((void)0)
 #define __HAL_RCC_GPIOB_CLK_ENABLE() ((void)0)
 #define __HAL_RCC_DMA1_CLK_ENABLE() ((void)0)
@@ -80,6 +99,9 @@ uint32_t HAL_GetTick(void);
 HAL_StatusTypeDef HAL_UART_Init(UART_HandleTypeDef *u);
 HAL_StatusTypeDef HAL_UART_Receive_DMA(UART_HandleTypeDef *u, uint8_t *b, uint16_t n);
 HAL_StatusTypeDef HAL_UART_Abort(UART_HandleTypeDef *u);
+HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *u, uint8_t *b, uint16_t n);
+HAL_StatusTypeDef HAL_UART_AbortTransmit(UART_HandleTypeDef *u);
+HAL_StatusTypeDef HAL_UART_AbortReceive(UART_HandleTypeDef *u);
 HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *d);
 HAL_StatusTypeDef HAL_DMA_DeInit(DMA_HandleTypeDef *d);
 HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *d);

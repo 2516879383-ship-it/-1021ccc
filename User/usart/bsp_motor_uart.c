@@ -6,13 +6,13 @@
 static UART_HandleTypeDef motor_uart;
 static DMA_HandleTypeDef rx_dma, tx_dma;
 /* Default linker places these in 0x20000000 SRAM, not CCM/SDRAM. */
-static uint8_t dma_rx[DMA_RX_SIZE], rx_queue[RX_QUEUE_SIZE], tx_bytes[16];
+static uint8_t dma_rx[DMA_RX_SIZE], rx_queue[RX_QUEUE_SIZE], tx_bytes[EMM_COMMAND_CAPACITY];
 static volatile uint16_t rx_write, rx_read;
 static uint16_t dma_read;
 static volatile uint8_t restart_rx;
 static uint8_t uart_ready;
 static volatile uint8_t tx_in_flight;
-static uint32_t tx_started_ms;
+static uint32_t tx_started_ms, tx_timeout_ms;
 static volatile uint32_t uart_errors, overflows;
 
 static void drain_dma(void)
@@ -62,18 +62,23 @@ void BspMotorUart_MspInit(UART_HandleTypeDef *uart)
 static int busy(void *context)
 {
     (void)context;
-    return !uart_ready || motor_uart.gState != HAL_UART_STATE_READY;
+    return !uart_ready || tx_in_flight || motor_uart.gState != HAL_UART_STATE_READY;
 }
 
 static int send(void *context, const uint8_t *data, uint8_t length)
 {
+    HAL_StatusTypeDef result;
     (void)context;
-    if (busy(0) || length > sizeof(tx_bytes)) return 0;
+    if (busy(0) || !data || !length || length > sizeof(tx_bytes)) return 0;
     memcpy(tx_bytes, data, length);
     tx_started_ms = HAL_GetTick();
+    tx_timeout_ms = 20u + ((uint32_t)length * 10000u + 115199u) / 115200u;
     tx_in_flight = 1u;
-    if (HAL_UART_Transmit_DMA(&motor_uart, tx_bytes, length) == HAL_OK) return 1;
-    tx_in_flight = 0u; ++uart_errors; restart_rx = 1u; return 0;
+    result = HAL_UART_Transmit_DMA(&motor_uart, tx_bytes, length);
+    if (result == HAL_OK) return 1;
+    tx_in_flight = 0u;
+    if (result != HAL_BUSY) { ++uart_errors; restart_rx = 1u; }
+    return 0;
 }
 
 MotorTransport BspMotorUart_Init(void)
@@ -98,12 +103,12 @@ MotorTransport BspMotorUart_Init(void)
     return transport;
 }
 
-void BspMotorUart_Pump(MotorService *service, uint32_t now_ms)
+static void pump(MotorService *service, MotorBus *bus, uint32_t now_ms)
 {
     static uint32_t seen_errors, seen_overflows;
     uint8_t bytes[64];
-    uint32_t count, mask, errors, dropped;
-    if (tx_in_flight && (uint32_t)(now_ms - tx_started_ms) >= 20u) {
+    uint32_t count, mask, errors, dropped, budget = 128u;
+    if (tx_in_flight && (uint32_t)(now_ms - tx_started_ms) >= tx_timeout_ms) {
         ++uart_errors; restart_rx = 1u;
     }
     if (restart_rx && uart_ready) {
@@ -126,8 +131,9 @@ void BspMotorUart_Pump(MotorService *service, uint32_t now_ms)
     }
     errors = uart_errors; dropped = overflows;
     if (seen_errors != errors || seen_overflows != dropped) {
-        MotorService_TransportError(service,
-            seen_overflows != dropped ? MOTOR_ERROR_RX_OVERFLOW : MOTOR_ERROR_UART, now_ms);
+        MotorError error = seen_overflows != dropped ? MOTOR_ERROR_RX_OVERFLOW : MOTOR_ERROR_UART;
+        if (bus) MotorBus_TransportError(bus, error, now_ms);
+        else MotorService_TransportError(service, error, now_ms);
         mask = __get_PRIMASK(); __disable_irq(); rx_read = rx_write; __set_PRIMASK(mask);
         seen_errors = errors; seen_overflows = dropped;
     }
@@ -137,9 +143,15 @@ void BspMotorUart_Pump(MotorService *service, uint32_t now_ms)
             __DMB(); bytes[count++] = rx_queue[rx_read];
             rx_read = (uint16_t)((rx_read + 1u) & (RX_QUEUE_SIZE - 1u));
         }
-        if (count) MotorService_Receive(service, bytes, count, now_ms);
-    } while (count);
+        if (count) {
+            if (bus) MotorBus_Receive(bus, bytes, count, now_ms);
+            else MotorService_Receive(service, bytes, count, now_ms);
+            budget -= count;
+        }
+    } while (count && budget);
 }
+void BspMotorUart_Pump(MotorService *service, uint32_t now_ms) { pump(service, 0, now_ms); }
+void BspMotorUart_PumpBus(MotorBus *bus, uint32_t now_ms) { pump(0, bus, now_ms); }
 
 void UART5_IRQHandler(void)
 {

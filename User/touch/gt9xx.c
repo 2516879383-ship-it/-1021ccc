@@ -265,10 +265,12 @@ const TOUCH_PARAM_TypeDef touch_param[TOUCH_TYPE_NUM] =
 static int8_t GTP_I2C_Test(void);
 //static void GT91xx_Config_Read_Proc(void);
 
+#if UPDATE_CONFIG
 static void Delay(__IO uint32_t nCount)	 //简单的延时函数
 {
 	for(; nCount != 0; nCount--);
 }
+#endif
 
 
 /**
@@ -818,6 +820,7 @@ Output:
 {
     int32_t ret = -1;
 
+#if UPDATE_CONFIG
     int32_t i = 0;
     uint8_t check_sum = 0;
     int32_t retry = 0;
@@ -827,6 +830,7 @@ Output:
     uint8_t cfg_info_len  ;
 
     uint8_t cfg_num =0x80FE-0x8047+1 ;		//需要配置的寄存器个数
+#endif
 
     GTP_DEBUG_FUNC();
 

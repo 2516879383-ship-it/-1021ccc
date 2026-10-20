@@ -6,6 +6,10 @@
 #define EMM_POSITION 0x36u
 #define EMM_SPEED    0x35u
 #define EMM_STATUS   0x3Au
+#define EMM_VERSION  0x1Fu
+#define EMM_SYNC     0xFFu
+#define EMM_MULTI    0xAAu
+#define EMM_COMMAND_CAPACITY 128u
 #define EMM_ENABLE  0xF3u
 #define EMM_VELOCITY 0xF6u
 #define EMM_MOVE    0xFDu
@@ -14,9 +18,11 @@
 #define EMM_ACK_TIMEOUT 0xFFu
 #define EMM_ACK_TRANSPORT 0xFCu
 
-typedef struct { uint8_t bytes[16], length, code; } EmmCommand;
+typedef enum { EMM_REL_TARGET, EMM_ABSOLUTE, EMM_REL_ACTUAL } EmmPositionMode;
+typedef struct { uint8_t bytes[EMM_COMMAND_CAPACITY], length, code; } EmmCommand;
 typedef struct {
-    uint8_t code, result, flags;
+    uint8_t address, code, result, flags;
+    uint16_t firmware, hardware;
     int64_t position;
     int32_t speed;
 } EmmFrame;
@@ -32,4 +38,12 @@ EmmCommand Emm_Velocity(uint8_t address, uint8_t direction, uint16_t rpm, uint8_
 EmmCommand Emm_Move(uint8_t address, uint8_t direction, uint16_t rpm,
                     uint8_t acceleration, uint32_t pulses);
 EmmCommand Emm_Stop(uint8_t address);
+EmmCommand Emm_VelocityEx(uint8_t address, uint8_t direction, uint16_t rpm,
+                          uint8_t acceleration, uint8_t cached);
+EmmCommand Emm_MoveEx(uint8_t address, uint8_t direction, uint16_t rpm,
+    uint8_t acceleration, uint32_t pulses, EmmPositionMode mode, uint8_t cached);
+/* Homogeneous motion only. Position notify bit is independent of unicast caching. */
+int Emm_Multi(EmmCommand *out, const EmmCommand *members, uint8_t count);
+int Emm_Wheels(EmmCommand *out, const int32_t rpm[4], uint8_t acceleration);
+EmmCommand Emm_SyncTrigger(void);
 #endif

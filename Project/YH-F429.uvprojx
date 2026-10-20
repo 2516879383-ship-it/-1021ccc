@@ -809,6 +809,11 @@
               <FilePath>..\User\motor\motor_service.c</FilePath>
             </File>
             <File>
+              <FileName>motor_bus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\motor\motor_bus.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_motor_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\usart\bsp_motor_uart.c</FilePath>

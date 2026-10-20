@@ -2,6 +2,7 @@
 #include "./lcd/bsp_lcd.h"
 #include <stdio.h>
 #include <string.h>
+#include "./motor/motor_test_config.h"
 
 static const uint16_t row_y[9] = {8u, 32u, 60u, 92u, 114u, 136u, 158u, 180u, 202u};
 static void line(QrUi *u, unsigned i, const char *text)
@@ -14,12 +15,14 @@ static void line(QrUi *u, unsigned i, const char *text)
     LCD_DisplayStringAt(8u, row_y[i], (uint8_t *)text, LEFT_MODE);
     strncpy(u->previous[i], text, 42u); u->previous[i][42] = '\0';
 }
-static void buttons(uint8_t motor)
+static void buttons(uint8_t motor, uint8_t manual)
 {
     LCD_SetFont(&Font16); LCD_SetTextColor(LCD_COLOR_WHITE);
-    LCD_FillRect(8u, 232u, 224u, 32u); LCD_FillRect(248u, 232u, 224u, 32u);
+    LCD_FillRect(8u, 232u, 144u, 32u); LCD_FillRect(160u, 232u, 80u, 32u);
+    LCD_FillRect(248u, 232u, 224u, 32u);
     LCD_SetTextColor(LCD_COLOR_BLACK); LCD_SetBackColor(LCD_COLOR_WHITE);
-    LCD_DisplayStringAt(20u, 240u, (uint8_t *)(motor ? "READ ONLY" : "RESCAN"), LEFT_MODE);
+    LCD_DisplayStringAt(20u, 240u, (uint8_t *)(motor ? (manual ? "READ ONLY" : "MANUAL") : "RESCAN"), LEFT_MODE);
+    LCD_DisplayStringAt(168u, 240u, (uint8_t *)"STOP", LEFT_MODE);
     LCD_DisplayStringAt(260u, 240u, (uint8_t *)(motor ? "QR" : "MOTOR"), LEFT_MODE);
     LCD_SetBackColor(LCD_COLOR_BLACK);
 }
@@ -30,9 +33,25 @@ QrUiAction QrUi_Touch(QrUi *u, int32_t x, int32_t y, uint8_t down)
 {
     uint8_t edge = (uint8_t)(down && !u->was_down);
     u->was_down = down;
-    if (!edge || y < 232 || y >= 264) return QR_UI_NONE;
-    if (x >= 248 && x < 472) { u->motor_page = (uint8_t)!u->motor_page; u->redraw = 1u; }
-    else if (!u->motor_page && x >= 8 && x < 232) { u->redraw = 1u; return QR_UI_RESCAN; }
+    if (!edge || x < 8 || x >= 472 || y < 0 || y >= 264) return QR_UI_NONE;
+    if (y >= 232) {
+        if (x >= 248) { u->motor_page = (uint8_t)!u->motor_page; u->redraw = 1u; }
+        else if (x >= 160 && x < 240) return QR_UI_STOP_ALL;
+        else if (x < 152) { u->redraw = 1u; return u->motor_page ? QR_UI_MODE : QR_UI_RESCAN; }
+    } else if (u->motor_page) {
+        if (!u->detail) {
+            unsigned i;
+            for (i = 1u; i <= 7u; ++i) if (y >= row_y[i] && y < row_y[i] + 18) {
+                u->selected = (uint8_t)(i - 1u); u->detail = 1u; u->redraw = 1u; break;
+            }
+        } else if (y >= 136 && y < 154) {
+            u->test_action = (uint8_t)((u->test_action + 1u) % 5u); u->redraw = 1u;
+        } else if (y >= 180 && y < 198) return x < 240 ? QR_UI_RUN : QR_UI_STOP_AXIS;
+        else if (y >= 202 && y < 220) {
+            if (x < 240) return QR_UI_STOP_WHEELS;
+            u->detail = 0u; u->redraw = 1u;
+        }
+    }
     return QR_UI_NONE;
 }
 
@@ -69,44 +88,59 @@ static void qr_page(QrUi *u, const QrService *s, uint32_t now)
     snprintf(t, sizeof(t), "DUP:%lu IGN:%lu RX:%s", (unsigned long)d->duplicates,
              (unsigned long)d->ignored, d->uart_ready ? "OK" : "ERR"); line(u, 8u, t);
 }
-static void motor_page(QrUi *u, const MotorSnapshot *d, uint32_t now)
+static void counts(char *t, size_t size, int64_t value)
 {
-    char t[43];
-    int64_t a;
-    line(u, 0u, "MOTOR READ ONLY - DEMO DISABLED");
-    snprintf(t, sizeof(t), "ADDR:%u UART5 115200 8N1", (unsigned)d->address); line(u, 1u, t);
-    snprintf(t, sizeof(t), "LINK: %s", d->online ? "ONLINE" : "OFFLINE / WAITING"); line(u, 2u, t);
-    if (d->valid & MOTOR_VALID_POSITION) {
-        a = d->position_counts * 36000 / 65536;
-        snprintf(t, sizeof(t), "POS:%s%ld.%02lu deg%s", a < 0 ? "-" : "",
-                 (long)((a < 0 ? -a : a) / 100), (unsigned long)((a < 0 ? -a : a) % 100),
-                 (uint32_t)(now - d->position_ms) > MOTOR_DATA_STALE_MS ? " STALE" : "");
-    } else strcpy(t, "POS:-- deg");
-    line(u, 3u, t);
-    if (d->valid & MOTOR_VALID_SPEED) snprintf(t, sizeof(t), "SPEED:%ld RPM%s", (long)d->speed_rpm,
-        (uint32_t)(now - d->speed_ms) > MOTOR_DATA_STALE_MS ? " STALE" : "");
-    else strcpy(t, "SPEED:-- RPM");
-    line(u, 4u, t);
-    if (d->valid & MOTOR_VALID_STATUS) snprintf(t, sizeof(t), "ENABLE:%u IN POS:%u%s",
-        (unsigned)(d->status_flags & 1u), (unsigned)((d->status_flags >> 1) & 1u),
-        (uint32_t)(now - d->status_ms) > MOTOR_DATA_STALE_MS ? " STALE" : "");
-    else strcpy(t, "ENABLE:-- IN POS:--");
-    line(u, 5u, t);
-    if (d->valid & MOTOR_VALID_STATUS) snprintf(t, sizeof(t), "STALL:%u PROTECT:%u%s",
-        (unsigned)((d->status_flags >> 2) & 1u), (unsigned)((d->status_flags >> 3) & 1u),
-        (uint32_t)(now - d->status_ms) > MOTOR_DATA_STALE_MS ? " STALE" : "");
-    else strcpy(t, "STALL:-- PROTECT:--");
-    line(u, 6u, t);
-    snprintf(t, sizeof(t), "RX:%lu TX:%lu BAD:%lu", (unsigned long)d->rx_count,
-             (unsigned long)d->tx_count, (unsigned long)d->bad_frames); line(u, 7u, t);
-    snprintf(t, sizeof(t), "ERR:%u TIMEOUT:%lu", (unsigned)d->last_error, (unsigned long)d->timeouts); line(u, 8u, t);
+    uint64_t v = (uint64_t)(value < 0 ? -value : value);
+    snprintf(t, size, "%s%lu", value < 0 ? "-" : "", (unsigned long)v);
 }
-void QrUi_Process(QrUi *u, const QrService *s, const MotorSnapshot *motor, uint32_t now)
+static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
+{
+    static const char *actions[] = {"ENABLE", "SPEED", "POSITION", "WHEELS 0xAA", "SYNC WHEELS"};
+    char t[43], value[16], target[16];
+    const MotorNode *n = &b->nodes[u->selected];
+    const MotorSnapshot *d = &n->data;
+    unsigned i;
+    line(u, 0u, b->manual ? "MOTOR MANUAL - STOP ALWAYS AVAILABLE" : "MOTOR READ ONLY - DEMO DISABLED");
+    if (!u->detail) {
+        for (i = 0u; i < MOTOR_COUNT; ++i) {
+            n = &b->nodes[i]; d = &n->data;
+            if (MotorBus_Fresh(n, MOTOR_VALID_SPEED, now)) snprintf(value, sizeof(value), "%ld", (long)d->speed_rpm);
+            else strcpy(value, "--");
+            if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, now)) snprintf(target, sizeof(target), "%02X", d->status_flags);
+            else strcpy(target, "--");
+            snprintf(t, sizeof(t), "%u %-4s %-5s RPM:%s S:%s", (unsigned)d->address, MotorBus_Role(d->address),
+                d->online ? (MotorBus_Fresh(n, MOTOR_VALID_SPEED, now) && MotorBus_Fresh(n, MOTOR_VALID_STATUS, now) ? "ON" : "STALE") :
+                d->rx_count ? "OFF" : "WAIT", value, target);
+            line(u, i + 1u, t);
+        }
+        snprintf(t, sizeof(t), "%.42s", b->message); line(u, 8u, t); return;
+    }
+    snprintf(t, sizeof(t), "%u %s %s %s", (unsigned)d->address, MotorBus_Role(d->address),
+        d->online ? "ON" : "OFF/WAIT", MotorBus_ActionName(n->action)); line(u, 1u, t);
+    if (d->valid & MOTOR_VALID_POSITION) counts(value, sizeof(value), d->position_counts); else strcpy(value, "--");
+    if (n->target_known) counts(target, sizeof(target), n->target_counts); else strcpy(target, "--");
+    snprintf(t, sizeof(t), "P:%s T:%s%s", value, target,
+        MotorBus_Fresh(n, MOTOR_VALID_POSITION, now) ? "" : " STALE"); line(u, 2u, t);
+    if (MotorBus_Fresh(n, MOTOR_VALID_SPEED, now)) snprintf(value, sizeof(value), "%ld", (long)d->speed_rpm);
+    else strcpy(value, "--");
+    if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, now)) snprintf(target, sizeof(target), "%02X", d->status_flags);
+    else strcpy(target, "--");
+    snprintf(t, sizeof(t), "RPM:%s STATUS:%s ERR:%u R:%02X/%02X", value, target, (unsigned)d->last_error,
+        (unsigned)d->command_code, (unsigned)d->command_result); line(u, 3u, t);
+    snprintf(t, sizeof(t), "AGE p/s/t:%lu/%lu/%lu", (unsigned long)(d->valid & 1u ? now - d->position_ms : 99999u),
+        (unsigned long)(d->valid & 2u ? now - d->speed_ms : 99999u),
+        (unsigned long)(d->valid & 4u ? now - d->status_ms : 99999u)); line(u, 4u, t);
+    snprintf(t, sizeof(t), "ACTION: %s [tap to cycle]", actions[u->test_action]); line(u, 5u, t);
+    snprintf(t, sizeof(t), "%.42s", b->message); line(u, 6u, t);
+    line(u, 7u, b->manual ? "RUN ONCE                  STOP AXIS" : "MANUAL REQUIRED           STOP AXIS");
+    line(u, 8u, "STOP WHEELS               BACK");
+}
+void QrUi_Process(QrUi *u, const QrService *s, const MotorBus *motor, uint32_t now)
 {
     if (!u->redraw && (uint32_t)(now - u->last_draw) < 100u) return;
     u->last_draw = now;
     if (u->redraw) {
-        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_Clear(LCD_COLOR_BLACK); buttons(u->motor_page);
+        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_Clear(LCD_COLOR_BLACK); buttons(u->motor_page, motor->manual);
     }
     if (u->motor_page) motor_page(u, motor, now); else qr_page(u, s, now);
     u->redraw = 0u;

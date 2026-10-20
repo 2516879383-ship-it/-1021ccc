@@ -8,6 +8,6 @@ $process = Start-Process -FilePath 'C:\Keil_v5\UV4\UV4.exe' -WorkingDirectory $p
 $log = Get-Content -LiteralPath $logFile
 $log | Select-Object -Last 15
 if ($process.ExitCode -gt 1 -or -not ($log -match '0 Error\(s\)')) { throw 'Keil build failed; see Output/build.log' }
-$unexpected = $log | Where-Object { $_ -match 'warning:' -and $_ -notmatch 'gt9xx.c\(\d+\): warning:  #177-D:' }
-if ($unexpected) { $unexpected; throw 'New compiler warning' }
-Write-Output 'BUILD PASS (baseline: 8 existing gt9xx unused-symbol warnings).'
+$warnings = $log | Where-Object { $_ -match 'warning:' }
+if ($warnings) { $warnings; throw 'Compiler warning(s) found' }
+Write-Output 'BUILD PASS (0 warnings).'

@@ -3,6 +3,7 @@
 #include "usart/bsp_qr_uart.h"
 #include "usart/bsp_qr_trigger.h"
 #include "usart/bsp_motor_uart.h"
+#include "motor/motor_test_config.h"
 #include "lcd/bsp_lcd.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -179,7 +180,7 @@ void HAL_DMA_IRQHandler(DMA_HandleTypeDef *d)
 void BspMotorUart_RxEvent(void) { ++motor_rx_events; }
 void BspMotorUart_Error(void) { ++motor_errors; }
 void BspMotorUart_TxComplete(void) { ++motor_tx_events; }
-void BspMotorUart_Pump(MotorService *s, uint32_t now) { (void)s; (void)now; ++motor_pumps; }
+void BspMotorUart_PumpBus(MotorBus *s, uint32_t now) { (void)s; (void)now; ++motor_pumps; }
 extern void USART3_IRQHandler(void);
 extern void DMA1_Stream1_IRQHandler(void);
 static void inject(const char *b, uint32_t at, int idle)
@@ -304,9 +305,12 @@ static void test_bsp(void)
 }
 
 static unsigned motor_sends, motion_sends;
+static unsigned app_commands[256];
+static uint8_t app_last[128], app_length;
 static int motor_send(void *ctx,const uint8_t *b,uint8_t n)
 {
-    (void)ctx; (void)n; ++motor_sends;
+    (void)ctx; ++motor_sends;
+    ++app_commands[b[1]]; memcpy(app_last,b,n); app_length=n;
     if(b[1]!=EMM_POSITION && b[1]!=EMM_SPEED && b[1]!=EMM_STATUS) ++motion_sends;
     return 1;
 }
@@ -364,7 +368,7 @@ static void test_app_ui(void)
     a.qr.data.accepted_seq=a.qr.data.accepted_ms=a.qr.data.frame_timeouts=UINT32_MAX;
     a.ui.redraw=1u; app_step(&a,20000u);
     CHECK(bad_layout==0u); /* include maximum 32-bit counters and both font sizes */
-    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor.data,21000u);
+    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor,21000u);
     CHECK(strstr(lines[1],"UART ERROR")!=0 && !strcmp(lines[2],"--"));
     save_image("qr_uart_error.pgm");
     QrApp_Init(&a,t,1u,22000u); CHECK(!a.qr.data.valid && a.qr.data.session==1u);
@@ -374,6 +378,82 @@ static void test_app_ui(void)
     click(&a,300,245,22100u); CHECK(!a.ui.motor_page && !strcmp(lines[2],sample));
     CHECK(trig_lows >= 5u); /* QrApp_Process keeps the trigger waveform running */
 }
+static void test_seven_ui(void)
+{
+    QrApp a; MotorTransport t={0,motor_send,motor_busy};
+    unsigned i, before=motion_sends;
+    QrApp_Init(&a,t,1u,30000u);
+    click(&a,300,245,30000u);
+    CHECK(a.ui.motor_page && !a.motor.manual);
+    for(i=0;i<7u;++i) CHECK(strstr(lines[i+1u],MotorBus_Role((uint8_t)(i+1u))) && strstr(lines[i+1u],"--"));
+    save_image("motor_seven_wait.pgm");
+    click(&a,20,140,30002u); CHECK(a.ui.detail && a.ui.selected==4u);
+    CHECK(strstr(lines[2],"--"));
+    click(&a,20,245,30004u); CHECK(a.motor.manual && strstr(lines[0],"MANUAL"));
+    click(&a,20,140,30006u); CHECK(a.ui.test_action==1u);
+    click(&a,20,184,30008u);
+    CHECK(motion_sends==before);
+#if !MOTOR_TEST_CONFIGURED
+    CHECK(strstr(a.motor.message,"CONFIGURE"));
+#endif
+    /* UI edge detection applies equally to one-shot position and group actions. */
+    a.ui.test_action=2u;
+    CHECK(QrUi_Touch(&a.ui,20,184,1u)==QR_UI_RUN);
+    CHECK(QrUi_Touch(&a.ui,20,184,1u)==QR_UI_NONE);
+    CHECK(QrUi_Touch(&a.ui,20,184,0u)==QR_UI_NONE);
+    CHECK(QrUi_Touch(&a.ui,170,245,1u)==QR_UI_STOP_ALL);
+    (void)QrUi_Touch(&a.ui,170,245,0u);
+    CHECK(QrUi_Touch(&a.ui,300,184,1u)==QR_UI_STOP_AXIS);
+    (void)QrUi_Touch(&a.ui,300,184,0u);
+    a.motor.nodes[4].data.valid=7u; a.motor.nodes[4].data.online=1u;
+    a.motor.nodes[4].data.position_counts=-INT64_C(4294967295);
+    a.motor.nodes[4].target_counts=INT64_C(4294967295); a.motor.nodes[4].target_known=1u;
+    a.motor.nodes[4].data.speed_rpm=INT32_MIN;
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,UINT32_MAX);
+    CHECK(!bad_layout && strstr(lines[2],"-4294967295")); save_image("motor_detail_stale.pgm");
+    a.ui.detail=0; a.ui.redraw=1u;
+    for(i=0;i<7u;++i) {
+        MotorSnapshot *d=&a.motor.nodes[i].data;
+        d->valid=7u; d->online=1u; d->speed_rpm=(int32_t)i*10;
+        d->status_flags=3u; d->speed_ms=d->status_ms=31000u;
+    }
+    QrUi_Process(&a.ui,&a.qr,&a.motor,31000u); save_image("motor_seven_online.pgm");
+    click(&a,20,245,31002u); CHECK(!a.motor.manual && a.motor.stop_mask);
+    CHECK(!bad_layout);
+}
+#if MOTOR_TEST_CONFIGURED
+static void manual_fixture(QrApp *a,uint32_t now,uint8_t action,uint8_t selected)
+{
+    MotorTransport t={0,motor_send,motor_busy}; unsigned i,j;
+    QrApp_Init(a,t,1u,now); a->ui.motor_page=a->ui.detail=1u;
+    a->ui.test_action=action; a->ui.selected=selected;
+    MotorBus_SetManual(&a->motor,1u,now);
+    for(i=0;i<7u;++i) {
+        MotorSnapshot *d=&a->motor.nodes[i].data;
+        d->valid=7u; d->online=1u; d->status_flags=3u; d->rx_count=1u;
+        d->position_ms=d->speed_ms=d->status_ms=d->last_rx_ms=now;
+        for(j=0;j<3u;++j) a->motor.nodes[i].poll_due[j]=now+10000u;
+    }
+}
+static void test_configured_actions(void)
+{
+    QrApp a; unsigned before; uint32_t now;
+    manual_fixture(&a,40000u,2u,4u); before=app_commands[EMM_MOVE];
+    touch_x=20; touch_y=184; touch_down=1u;
+    for(now=40000u;now<40040u;++now) app_step(&a,now);
+    CHECK(app_commands[EMM_MOVE]==before+1u && app_last[0]==5u && app_last[10]==2u);
+    touch_down=0u; app_step(&a,40040u);
+    manual_fixture(&a,41000u,1u,6u); before=app_commands[EMM_VELOCITY];
+    click(&a,20,184,41000u);
+    CHECK(app_commands[EMM_VELOCITY]==before+1u && app_last[0]==7u && app_length==8u);
+    manual_fixture(&a,42000u,3u,0u); before=app_commands[EMM_MULTI];
+    click(&a,20,184,42000u);
+    CHECK(app_commands[EMM_MULTI]==before+1u && app_length==37u && app_last[3]==37u);
+    manual_fixture(&a,43000u,4u,0u); before=app_commands[EMM_SYNC];
+    click(&a,20,184,43000u); CHECK(app_commands[EMM_SYNC]==before && strstr(a.motor.message,"LOCKED"));
+    CHECK(!bad_layout);
+}
+#endif
 int main(int argc,char **argv)
 {
     if(argc>1) {
@@ -386,7 +466,10 @@ int main(int argc,char **argv)
         CHECK(!s.data.valid && !s.data.uart_ready && !strcmp(QrService_StateName(&s),"UART ERROR"));
         printf("PASS: QR startup failure (%s)\n",argv[1]); return 0;
     }
-    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui();
+    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui();
+#if MOTOR_TEST_CONFIGURED
+    test_configured_actions();
+#endif
     printf("PASS: %u QR checks (parser, sessions, real BSP/callbacks, app, UI)\n",checks);
     return 0;
 }

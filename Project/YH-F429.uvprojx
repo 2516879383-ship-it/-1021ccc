@@ -798,17 +798,61 @@
               <FileType>1</FileType>
               <FilePath>..\User\app\motor_ui.c</FilePath>
             </File>
-            <File><FileName>emm_protocol.c</FileName><FileType>1</FileType><FilePath>..\User\motor\emm_protocol.c</FilePath></File>
-            <File><FileName>motor_service.c</FileName><FileType>1</FileType><FilePath>..\User\motor\motor_service.c</FilePath></File>
-            <File><FileName>bsp_motor_uart.c</FileName><FileType>1</FileType><FilePath>..\User\usart\bsp_motor_uart.c</FilePath></File>
-            <File><FileName>motor_demo.c</FileName><FileType>1</FileType><FilePath>..\User\motor\motor_demo.c</FilePath></File>
-            <File><FileName>qr_task_code.c</FileName><FileType>1</FileType><FilePath>..\User\qr\qr_task_code.c</FilePath></File>
-            <File><FileName>qr_stream.c</FileName><FileType>1</FileType><FilePath>..\User\qr\qr_stream.c</FilePath></File>
-            <File><FileName>qr_service.c</FileName><FileType>1</FileType><FilePath>..\User\qr\qr_service.c</FilePath></File>
-            <File><FileName>qr_ui.c</FileName><FileType>1</FileType><FilePath>..\User\app\qr_ui.c</FilePath></File>
-            <File><FileName>qr_app.c</FileName><FileType>1</FileType><FilePath>..\User\app\qr_app.c</FilePath></File>
-            <File><FileName>bsp_qr_uart.c</FileName><FileType>1</FileType><FilePath>..\User\usart\bsp_qr_uart.c</FilePath></File>
-            <File><FileName>bsp_uart_callbacks.c</FileName><FileType>1</FileType><FilePath>..\User\usart\bsp_uart_callbacks.c</FilePath></File>
+            <File>
+              <FileName>emm_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\motor\emm_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\motor\motor_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_motor_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\usart\bsp_motor_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor_demo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\motor\motor_demo.c</FilePath>
+            </File>
+            <File>
+              <FileName>qr_task_code.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\qr\qr_task_code.c</FilePath>
+            </File>
+            <File>
+              <FileName>qr_stream.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\qr\qr_stream.c</FilePath>
+            </File>
+            <File>
+              <FileName>qr_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\qr\qr_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>qr_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app\qr_ui.c</FilePath>
+            </File>
+            <File>
+              <FileName>qr_app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\app\qr_app.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_qr_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\usart\bsp_qr_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_uart_callbacks.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\usart\bsp_uart_callbacks.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

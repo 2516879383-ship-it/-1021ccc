@@ -180,7 +180,9 @@ void HAL_DMA_IRQHandler(DMA_HandleTypeDef *d)
 void BspMotorUart_RxEvent(void) { ++motor_rx_events; }
 void BspMotorUart_Error(void) { ++motor_errors; }
 void BspMotorUart_TxComplete(void) { ++motor_tx_events; }
-void BspMotorUart_PumpBus(MotorBus *s, uint32_t now) { (void)s; (void)now; ++motor_pumps; }
+static void (*motor_pump_hook)(MotorBus *,uint32_t);
+void BspMotorUart_PumpBus(MotorBus *s, uint32_t now)
+{ ++motor_pumps; if(motor_pump_hook) motor_pump_hook(s,now); }
 extern void USART3_IRQHandler(void);
 extern void DMA1_Stream1_IRQHandler(void);
 static void inject(const char *b, uint32_t at, int idle)
@@ -454,8 +456,113 @@ static void test_configured_actions(void)
     CHECK(!bad_layout);
 }
 #endif
+/* Boot-test fixture uses the real QrApp/MotorBus while simulating four motors. */
+static struct {
+    uint8_t bytes[128], pending, online, flags[7], reject_enable, drop_velocity;
+    int32_t rpm[7];
+    uint8_t code[32], address[32]; uint32_t at[32]; unsigned count;
+} boot_motor;
+static int boot_send(void *ctx,const uint8_t *b,uint8_t length)
+{
+    (void)ctx;
+    CHECK(!boot_motor.pending && length<=sizeof(boot_motor.bytes));
+    memcpy(boot_motor.bytes,b,length); boot_motor.pending=1u;
+    if(b[1]==EMM_ENABLE || b[1]==EMM_VELOCITY || b[1]==EMM_STOP) {
+        CHECK(boot_motor.count<32u);
+        boot_motor.code[boot_motor.count]=b[1]; boot_motor.address[boot_motor.count]=b[0];
+        boot_motor.at[boot_motor.count++]=tick;
+    }
+    return 1;
+}
+static void boot_reply(MotorBus *bus,uint32_t now)
+{
+    uint8_t r[8]={0}, *b=boot_motor.bytes, length=4u;
+    unsigned i;
+    if(!boot_motor.pending) return;
+    boot_motor.pending=0u; i=b[0]-1u;
+    if(!(boot_motor.online & (1u<<i))) return;
+    r[0]=b[0]; r[1]=b[1]; r[2]=2u;
+    if(b[1]==EMM_ENABLE) {
+        if(b[0]==boot_motor.reject_enable) r[2]=0xE2u;
+        else boot_motor.flags[i]=(uint8_t)(2u|b[3]);
+    } else if(b[1]==EMM_VELOCITY) {
+        boot_motor.rpm[i]=((int32_t)b[3]<<8)|b[4];
+        if(b[2]) boot_motor.rpm[i]=-boot_motor.rpm[i];
+        if(boot_motor.drop_velocity) return;
+    } else if(b[1]==EMM_STOP) boot_motor.rpm[i]=0;
+    else if(b[1]==EMM_SPEED) {
+        length=6u; r[2]=(uint8_t)(boot_motor.rpm[i]<0);
+        r[4]=(uint8_t)(r[2] ? -boot_motor.rpm[i] : boot_motor.rpm[i]);
+    } else if(b[1]==EMM_POSITION) { length=8u; r[2]=0u; }
+    else if(b[1]==EMM_STATUS) r[2]=boot_motor.flags[i];
+    r[length-1u]=0x6Bu;
+    MotorBus_Receive(bus,r,length,now);
+}
+static void boot_fixture(QrApp *a,uint32_t now)
+{
+    MotorTransport t={0,boot_send,motor_busy};
+    memset(&boot_motor,0,sizeof(boot_motor)); boot_motor.online=0x0Fu;
+    memset(boot_motor.flags,2,sizeof(boot_motor.flags)); motor_pump_hook=boot_reply;
+    touch_down=0u; tick=now; BspQrTrigger_Init();
+    QrApp_Init(a,t,1u,now);
+    CHECK(a->boot_phase!=0u && !a->motor.manual);
+}
+static unsigned boot_starts(void)
+{
+    unsigned i,count=0u;
+    for(i=0;i<boot_motor.count;++i) if(boot_motor.code[i]==EMM_VELOCITY) ++count;
+    return count;
+}
+static void test_boot_sequence(void)
+{
+    QrApp a; uint32_t now; unsigned i, before;
+    CHECK(MOTOR_BOOT_SEQUENCE_ENABLED && BspQrUart_Init());
+    boot_fixture(&a,0u);
+    for(now=0u;now<16000u;++now) {
+        if(now==3500u) inject("156+123+516+231\r",now,1);
+        app_step(&a,now);
+    }
+    CHECK(boot_motor.count==12u && a.boot_phase==0u && !a.motor.manual);
+    for(i=0;i<4u;++i) {
+        CHECK(boot_motor.code[i]==EMM_ENABLE && boot_motor.address[i]==i+1u);
+        CHECK(boot_motor.code[i+4u]==EMM_VELOCITY && boot_motor.address[i+4u]==i+1u);
+        CHECK(boot_motor.code[i+8u]==EMM_STOP && boot_motor.address[i+8u]==i+1u);
+        CHECK(boot_motor.rpm[i]==0 && a.motor.nodes[i].action==MOTOR_STOPPED);
+        if(i) {
+            CHECK(boot_motor.at[i+4u]-boot_motor.at[i+3u]>=MOTOR_BOOT_STEP_MS);
+            CHECK(boot_motor.at[i+8u]-boot_motor.at[i+7u]>=MOTOR_BOOT_STEP_MS);
+        }
+    }
+    CHECK(boot_motor.at[8]-boot_motor.at[7]>=MOTOR_BOOT_STEP_MS);
+    CHECK(a.qr.data.valid && trig_lows>10u && strstr(a.motor.message,"DONE"));
+    printf("BOOT timeline start: %lu/%lu/%lu/%lu; stop: %lu/%lu/%lu/%lu ms\n",
+        (unsigned long)boot_motor.at[4],(unsigned long)boot_motor.at[5],
+        (unsigned long)boot_motor.at[6],(unsigned long)boot_motor.at[7],
+        (unsigned long)boot_motor.at[8],(unsigned long)boot_motor.at[9],
+        (unsigned long)boot_motor.at[10],(unsigned long)boot_motor.at[11]);
+    before=boot_motor.count;
+    for(;now<21000u;++now) app_step(&a,now);
+    CHECK(boot_motor.count==before); /* no repeats after finish */
+    boot_fixture(&a,22000u);
+    for(now=22000u;now<30000u && !boot_starts();++now) app_step(&a,now);
+    CHECK(boot_starts()==1u); click(&a,170,245,now);
+    for(now+=2u;now<35000u;++now) app_step(&a,now);
+    CHECK(a.boot_phase==0u && boot_starts()==1u && !boot_motor.rpm[0]);
+    boot_fixture(&a,36000u); boot_motor.online=0x07u;
+    for(now=36000u;now<49000u;++now) app_step(&a,now);
+    CHECK(!boot_starts() && a.boot_phase==0u && !a.motor.manual);
+    boot_fixture(&a,50000u); boot_motor.reject_enable=2u;
+    for(now=50000u;now<59000u;++now) app_step(&a,now);
+    CHECK(!boot_starts() && a.boot_phase==0u);
+    boot_fixture(&a,60000u); boot_motor.drop_velocity=1u;
+    for(now=60000u;now<73000u;++now) app_step(&a,now);
+    CHECK(boot_starts()==1u && a.boot_phase==0u && !boot_motor.rpm[0]);
+    CHECK(!bad_layout);
+    printf("PASS: %u boot checks (order, one-shot, missing motor, enable rejection, ACK loss, STOP, QR)\n",checks);
+}
 int main(int argc,char **argv)
 {
+    if(argc>1 && !strcmp(argv[1],"boot")) { test_boot_sequence(); return 0; }
     if(argc>1) {
         QrService s;
         if(!strcmp(argv[1],"init")) init_fail=1;

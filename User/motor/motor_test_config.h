@@ -9,6 +9,13 @@
 #define MOTOR_TEST_ACCELERATION 100u
 #define MOTOR_TEST_DIRECTION 0u
 #define MOTOR_TEST_LEASE_MS 1000u
+/* One-shot power-on test: enable 1..4, start 1..4, then stop 1..4.
+   Set to 0 to restore the previous read-only boot. No motion on 5..7. */
+#ifndef MOTOR_BOOT_SEQUENCE_ENABLED
+#define MOTOR_BOOT_SEQUENCE_ENABLED 1u
+#endif
+#define MOTOR_BOOT_RPM 10u
+#define MOTOR_BOOT_STEP_MS 1000u
 #define MOTOR_TEST_WHEEL_RPM {10, -12, 14, -16}
 #define MOTOR_TEST_PULSES 32u
 #define MOTOR_TEST_POSITION_MODE EMM_REL_ACTUAL

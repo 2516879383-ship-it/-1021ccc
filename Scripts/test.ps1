@@ -16,7 +16,7 @@ $qrSources = @('Tests\test_qr.c', 'User\app\qr_ui.c', 'User\app\qr_app.c', 'User
     'User\fonts\font16.c', 'User\fonts\font24.c') | ForEach-Object { Join-Path $projectRoot $_ }
 $qrSources += @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'User\qr') -Filter '*.c' | ForEach-Object { $_.FullName })
 $qrArgs = ($qrSources | ForEach-Object { '"' + $_ + '"' }) -join ' '
-$qrCommand = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /nologo /W4 /WX /std:c11 /D_CRT_SECURE_NO_WARNINGS /I"' + (Join-Path $projectRoot 'Tests\stubs') + '" /I"' + (Join-Path $projectRoot 'User') + '" ' + $qrArgs + ' /Fe:qr_tests.exe && qr_tests.exe && qr_tests.exe init && qr_tests.exe dma && qr_tests.exe receive && qr_tests.exe start'
+$qrCommand = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /nologo /W4 /WX /std:c11 /D_CRT_SECURE_NO_WARNINGS /DMOTOR_BOOT_SEQUENCE_ENABLED=0 /I"' + (Join-Path $projectRoot 'Tests\stubs') + '" /I"' + (Join-Path $projectRoot 'User') + '" ' + $qrArgs + ' /Fe:qr_tests.exe && qr_tests.exe && qr_tests.exe init && qr_tests.exe dma && qr_tests.exe receive && qr_tests.exe start'
 & $env:ComSpec /d /s /c $qrCommand
 if ($LASTEXITCODE -ne 0) { throw 'QR host tests failed' }
 $busSources = @('Tests\test_motor_bus.c', 'User\motor\emm_protocol.c', 'User\motor\motor_bus.c') | ForEach-Object { Join-Path $projectRoot $_ }
@@ -33,3 +33,6 @@ if ($LASTEXITCODE -ne 0) { throw 'Motor UART5 BSP host tests failed' }
 $configuredCommand = $qrCommand.Replace('/D_CRT_SECURE_NO_WARNINGS', '/D_CRT_SECURE_NO_WARNINGS /DMOTOR_TEST_CONFIGURED=1 /DMOTOR_TEST_PULSES_PER_REV=3200').Replace('/Fe:qr_tests.exe', '/Fe:qr_manual_tests.exe').Replace('&& qr_tests.exe', '&& qr_manual_tests.exe')
 & $env:ComSpec /d /s /c $configuredCommand
 if ($LASTEXITCODE -ne 0) { throw 'Configured manual application tests failed' }
+$bootCommand = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /nologo /W4 /WX /std:c11 /D_CRT_SECURE_NO_WARNINGS /I"' + (Join-Path $projectRoot 'Tests\stubs') + '" /I"' + (Join-Path $projectRoot 'User') + '" ' + $qrArgs + ' /Fe:boot_tests.exe && boot_tests.exe boot'
+& $env:ComSpec /d /s /c $bootCommand
+if ($LASTEXITCODE -ne 0) { throw 'One-shot wheel boot tests failed' }

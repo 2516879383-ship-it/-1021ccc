@@ -27,8 +27,8 @@ int main(void)
     BspQrTrigger_Init();
     QrApp_Init(&app, motor, qr_ready, HAL_GetTick());
     while (1) {
-        /* QR bring-up: read-only motor polling; automatic demo remains disabled.
-           motor_demo.c/config/project references and its tests are preserved. */
+        /* QR + seven-node bus, with the configured one-shot wheel boot test.
+           The original MotorDemo remains disabled. */
         QrApp_Process(&app, HAL_GetTick());
     }
 }

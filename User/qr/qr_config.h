@@ -15,7 +15,7 @@
 
 /* MCU-driven XM1605 TRIG (pin 12, active low). PB12 is on header J7 pin 14
    and is not used by the current LCD/SDRAM/touch/USART BSPs.
-   Default waveform: 80 ms low (capture window) + 20 ms high per 100 ms.
+   Current waveform: 800 ms low (capture window) + 200 ms high per 1000 ms.
    The module must be in manual/level-trigger mode; in continuous mode TRIG
    means pause/resume, not "scan once". Tune these when doing physical tests. */
 #define QR_TRIG_PORT GPIOB

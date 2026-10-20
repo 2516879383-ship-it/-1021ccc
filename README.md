@@ -170,7 +170,8 @@ PB12 由 User/usart/bsp_qr_trigger.c 初始化为推挽输出，上电先保持�
 | 单电机行为及测试说明 | [MOTOR_DEMO.md](E:/工创赛/迁移野火板/Doc/MOTOR_DEMO.md) |
 | 七电机总体架构方案 | [七电机整车程序架构设计](E:/工创赛/迁移分析/七电机整车程序架构设计_2026-10-20.md) |
 | 二维码实现与实物联调说明 | [QR_UART.md](E:/工创赛/迁移野火板/Doc/QR_UART.md) |
-| 二维码阶段任务书 | [QR_UART_STAGE_TASK.md](E:/工创赛/迁移野火板/Doc/QR_UART_STAGE_TASK.md) |
+| 二维码阶段任务书（已完成） | [QR_UART_STAGE_TASK.md](E:/工创赛/迁移野火板/Doc/QR_UART_STAGE_TASK.md) |
+| 七电机通信阶段任务书（待实施） | [MULTI_MOTOR_STAGE_TASK.md](E:/工创赛/迁移野火板/Doc/MULTI_MOTOR_STAGE_TASK.md) |
 | 前期起步分析 | E:/工创赛/迁移分析/野火V1多外设项目_起步工程建议.md |
 | 迁移兼容性分析 | E:/工创赛/迁移分析/F429野火V1迁移兼容性分析.md |
 | 野火资料 | E:/MPU's_study/野火【STM32F429开发板-挑战者】资料 |

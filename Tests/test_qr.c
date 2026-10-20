@@ -244,14 +244,14 @@ static void test_bsp(void)
     uint32_t seq;
     CHECK(BspQrUart_Init());
     CHECK(uart->Init.BaudRate==QR_UART_BAUDRATE && gpio_checked==1u && priority_checked==2u);
-    /* MCU trigger pin: init high, then 80 ms low + 20 ms high every 100 ms. */
+    /* MCU trigger pin: init high, then 800 ms low + 200 ms high every 1000 ms. */
     BspQrTrigger_Init();
     CHECK(trig_gpio_inits==1u && trig_level==GPIO_PIN_SET);
     BspQrTrigger_Poll(1000u); CHECK(trig_level==GPIO_PIN_RESET && trig_lows==1u);
-    BspQrTrigger_Poll(1079u); CHECK(trig_level==GPIO_PIN_RESET);
-    BspQrTrigger_Poll(1080u); CHECK(trig_level==GPIO_PIN_SET);
-    BspQrTrigger_Poll(1099u); CHECK(trig_level==GPIO_PIN_SET);
-    BspQrTrigger_Poll(1100u); CHECK(trig_level==GPIO_PIN_RESET && trig_lows==2u);
+    BspQrTrigger_Poll(1799u); CHECK(trig_level==GPIO_PIN_RESET);
+    BspQrTrigger_Poll(1800u); CHECK(trig_level==GPIO_PIN_SET);
+    BspQrTrigger_Poll(1999u); CHECK(trig_level==GPIO_PIN_SET);
+    BspQrTrigger_Poll(2000u); CHECK(trig_level==GPIO_PIN_RESET && trig_lows==2u);
     m.Instance=UART5; debug.Instance=USART1;
     HAL_UART_RxHalfCpltCallback(&m); HAL_UART_RxCpltCallback(&m);
     HAL_UART_ErrorCallback(&m); HAL_UART_TxCpltCallback(&m);
@@ -372,7 +372,7 @@ static void test_app_ui(void)
     inject("156+123+516+231\r",22003u,1); app_step(&a,22003u);
     CHECK(a.qr.data.valid && a.qr.data.session==1u);
     click(&a,300,245,22100u); CHECK(!a.ui.motor_page && !strcmp(lines[2],sample));
-    CHECK(trig_lows >= 20u); /* QrApp_Process keeps the trigger waveform running */
+    CHECK(trig_lows >= 5u); /* QrApp_Process keeps the trigger waveform running */
 }
 int main(int argc,char **argv)
 {

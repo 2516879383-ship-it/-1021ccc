@@ -1,6 +1,7 @@
 #include "qr_app.h"
 #include "app_runtime.h"
 #include "./usart/bsp_qr_uart.h"
+#include "./usart/bsp_qr_trigger.h"
 #include "./usart/bsp_motor_uart.h"
 #include "./motor/motor_demo_config.h"
 
@@ -19,6 +20,7 @@ void QrApp_Process(QrApp *a, uint32_t now)
     now = AppClock_Now();
     if (QrUi_Touch(&a->ui, x, y, down) == QR_UI_RESCAN)
         BspQrUart_BeginSession(&a->qr, now);
+    BspQrTrigger_Poll(now);
     BspQrUart_Pump(&a->qr, now);
     now = AppClock_Now(); /* Capture IRQs/touch I2C can advance SysTick during a step. */
     QrService_Process(&a->qr, now);

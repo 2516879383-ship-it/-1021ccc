@@ -849,6 +849,11 @@
               <FilePath>..\User\usart\bsp_qr_uart.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_qr_trigger.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\usart\bsp_qr_trigger.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_uart_callbacks.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\usart\bsp_uart_callbacks.c</FilePath>

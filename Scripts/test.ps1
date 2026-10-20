@@ -11,7 +11,7 @@ $command = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /no
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw 'Motor host tests failed' }
 $qrSources = @('Tests\test_qr.c', 'User\app\qr_ui.c', 'User\app\qr_app.c', 'User\app\app_runtime.c',
-    'User\usart\bsp_qr_uart.c', 'User\usart\bsp_uart_callbacks.c',
+    'User\usart\bsp_qr_uart.c', 'User\usart\bsp_qr_trigger.c', 'User\usart\bsp_uart_callbacks.c',
     'User\motor\emm_protocol.c', 'User\motor\motor_service.c',
     'User\fonts\font16.c', 'User\fonts\font24.c') | ForEach-Object { Join-Path $projectRoot $_ }
 $qrSources += @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'User\qr') -Filter '*.c' | ForEach-Object { $_.FullName })

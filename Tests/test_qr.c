@@ -1,6 +1,7 @@
 #include "app/qr_app.h"
 #include "app/app_runtime.h"
 #include "usart/bsp_qr_uart.h"
+#include "usart/bsp_qr_trigger.h"
 #include "usart/bsp_motor_uart.h"
 #include "lcd/bsp_lcd.h"
 #include <stdio.h>
@@ -122,7 +123,8 @@ static uint16_t dma_size;
 static uint32_t tick, irq_mask;
 static int init_fail, dma_init_fail, receive_fail, dma_start_fail;
 static unsigned dma_event, motor_rx_events, motor_errors, motor_tx_events, motor_pumps, aborts;
-static unsigned gpio_checked, priority_checked;
+static unsigned gpio_checked, priority_checked, trig_gpio_inits, trig_lows, trig_highs;
+static uint32_t trig_level = GPIO_PIN_SET;
 uint32_t __get_PRIMASK(void) { return irq_mask; }
 void __disable_irq(void) { irq_mask=1u; }
 void __set_PRIMASK(uint32_t mask) { irq_mask=mask; }
@@ -146,7 +148,22 @@ HAL_StatusTypeDef HAL_UART_Abort(UART_HandleTypeDef *u)
 HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *d) { d->State=HAL_DMA_STATE_READY; return HAL_OK; }
 HAL_StatusTypeDef HAL_DMA_DeInit(DMA_HandleTypeDef *d) { d->State=HAL_DMA_STATE_READY; return HAL_OK; }
 void HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *g)
-{ CHECK(port==GPIOB && g->Pin==(GPIO_PIN_10|GPIO_PIN_11) && g->Alternate==GPIO_AF7_USART3); ++gpio_checked; }
+{
+    if (g->Pin == (GPIO_PIN_10 | GPIO_PIN_11)) {
+        CHECK(port==GPIOB && g->Mode==GPIO_MODE_AF_PP && g->Alternate==GPIO_AF7_USART3);
+        ++gpio_checked;
+    } else {
+        CHECK(port==GPIOB && g->Pin==QR_TRIG_PIN && g->Mode==GPIO_MODE_OUTPUT_PP);
+        ++trig_gpio_inits;
+    }
+}
+void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pin, uint32_t state)
+{
+    /* Called every trigger phase; validate without incrementing the check count. */
+    if (port != GPIOB || pin != QR_TRIG_PIN) { fprintf(stderr,"FAIL: trigger GPIO write\n"); exit(1); }
+    if (state == GPIO_PIN_RESET) ++trig_lows; else ++trig_highs;
+    trig_level = state;
+}
 void HAL_NVIC_SetPriority(unsigned irq, unsigned preempt, unsigned sub)
 { CHECK((irq==USART3_IRQn || irq==DMA1_Stream1_IRQn) && preempt==2u && sub==0u); ++priority_checked; }
 void HAL_NVIC_EnableIRQ(unsigned irq) { (void)irq; }
@@ -227,6 +244,14 @@ static void test_bsp(void)
     uint32_t seq;
     CHECK(BspQrUart_Init());
     CHECK(uart->Init.BaudRate==QR_UART_BAUDRATE && gpio_checked==1u && priority_checked==2u);
+    /* MCU trigger pin: init high, then 80 ms low + 20 ms high every 100 ms. */
+    BspQrTrigger_Init();
+    CHECK(trig_gpio_inits==1u && trig_level==GPIO_PIN_SET);
+    BspQrTrigger_Poll(1000u); CHECK(trig_level==GPIO_PIN_RESET && trig_lows==1u);
+    BspQrTrigger_Poll(1079u); CHECK(trig_level==GPIO_PIN_RESET);
+    BspQrTrigger_Poll(1080u); CHECK(trig_level==GPIO_PIN_SET);
+    BspQrTrigger_Poll(1099u); CHECK(trig_level==GPIO_PIN_SET);
+    BspQrTrigger_Poll(1100u); CHECK(trig_level==GPIO_PIN_RESET && trig_lows==2u);
     m.Instance=UART5; debug.Instance=USART1;
     HAL_UART_RxHalfCpltCallback(&m); HAL_UART_RxCpltCallback(&m);
     HAL_UART_ErrorCallback(&m); HAL_UART_TxCpltCallback(&m);
@@ -347,6 +372,7 @@ static void test_app_ui(void)
     inject("156+123+516+231\r",22003u,1); app_step(&a,22003u);
     CHECK(a.qr.data.valid && a.qr.data.session==1u);
     click(&a,300,245,22100u); CHECK(!a.ui.motor_page && !strcmp(lines[2],sample));
+    CHECK(trig_lows >= 20u); /* QrApp_Process keeps the trigger waveform running */
 }
 int main(int argc,char **argv)
 {

@@ -5,6 +5,7 @@
 #include "./app/qr_app.h"
 #include "./usart/bsp_motor_uart.h"
 #include "./usart/bsp_qr_uart.h"
+#include "./usart/bsp_qr_trigger.h"
 
 int main(void)
 {
@@ -23,6 +24,7 @@ int main(void)
     GTP_SetRuntimeMode();
     motor = BspMotorUart_Init();
     qr_ready = BspQrUart_Init();
+    BspQrTrigger_Init();
     QrApp_Init(&app, motor, qr_ready, HAL_GetTick());
     while (1) {
         /* QR bring-up: read-only motor polling; automatic demo remains disabled.

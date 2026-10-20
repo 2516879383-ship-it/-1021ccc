@@ -35,10 +35,16 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define DMA_FIFOMODE_DISABLE 0u
 #define GPIO_PIN_10 (1u << 10)
 #define GPIO_PIN_11 (1u << 11)
+#define GPIO_PIN_12 (1u << 12)
 #define GPIO_MODE_AF_PP 2u
+#define GPIO_MODE_OUTPUT_PP 1u
 #define GPIO_PULLUP 1u
+#define GPIO_NOPULL 0u
+#define GPIO_SPEED_FREQ_LOW 0u
 #define GPIO_SPEED_FREQ_VERY_HIGH 3u
 #define GPIO_AF7_USART3 7u
+#define GPIO_PIN_RESET 0u
+#define GPIO_PIN_SET 1u
 #define UART_WORDLENGTH_8B 0u
 #define UART_STOPBITS_1 0u
 #define UART_PARITY_NONE 0u
@@ -78,6 +84,7 @@ HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *d);
 HAL_StatusTypeDef HAL_DMA_DeInit(DMA_HandleTypeDef *d);
 HAL_StatusTypeDef HAL_DMA_Abort(DMA_HandleTypeDef *d);
 void HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *gpio);
+void HAL_GPIO_WritePin(GPIO_TypeDef *port, uint16_t pin, uint32_t state);
 void HAL_NVIC_SetPriority(unsigned irq, unsigned preempt, unsigned sub);
 void HAL_NVIC_EnableIRQ(unsigned irq);
 void HAL_NVIC_DisableIRQ(unsigned irq);

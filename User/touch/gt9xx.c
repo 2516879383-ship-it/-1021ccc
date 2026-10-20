@@ -477,7 +477,7 @@ static void GTP_Touch_Down(int32_t id,int32_t x,int32_t y,int32_t w)
 	GTP_DEBUG_FUNC();
 
 	/*取x、y初始值大于屏幕像素值*/
-    GTP_DEBUG("ID:%d, X:%d, Y:%d, W:%d", id, x, y, w);
+    if (!touch_runtime) GTP_DEBUG("ID:%d, X:%d, Y:%d, W:%d", id, x, y, w);
 
 
     /* 处理触摸按钮，用于触摸画板 */
@@ -522,7 +522,7 @@ static void GTP_Touch_Up( int32_t id)
 	  pre_x[id] = -1;
 	  pre_y[id] = -1;
 
-    GTP_DEBUG("Touch id[%2d] release!", id);
+    if (!touch_runtime) GTP_DEBUG("Touch id[%2d] release!", id);
 
 }
 

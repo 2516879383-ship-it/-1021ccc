@@ -2,16 +2,15 @@
 #include "./usart/bsp_debug_usart.h"
 #include "./lcd/bsp_lcd.h"
 #include "./touch/gt9xx.h"
-#include "./app/app_runtime.h"
-#include "./app/motor_ui.h"
+#include "./app/qr_app.h"
 #include "./usart/bsp_motor_uart.h"
-#include "./motor/motor_demo.h"
-#include "./motor/motor_demo_config.h"
+#include "./usart/bsp_qr_uart.h"
 
 int main(void)
 {
-    static MotorService service;
-    static MotorDemo demo;
+    static QrApp app;
+    MotorTransport motor;
+    uint8_t qr_ready;
     HAL_Init();
     SystemClock_Config();
     DEBUG_USART_Config();
@@ -21,19 +20,14 @@ int main(void)
     LCD_SelectLayer(0);
     LCD_SetTransparency(0, 255);
     LCD_DisplayOn();
-    MotorUi_Init();
     GTP_SetRuntimeMode();
-    MotorService_Init(&service, BspMotorUart_Init(), MOTOR_DEMO_ADDRESS, HAL_GetTick());
-    MotorDemo_Init(&demo, HAL_GetTick());
+    motor = BspMotorUart_Init();
+    qr_ready = BspQrUart_Init();
+    QrApp_Init(&app, motor, qr_ready, HAL_GetTick());
     while (1) {
-        uint32_t now = HAL_GetTick();
-        /*
-        BspMotorUart_Pump(&service, now);
-        MotorService_Process(&service, now);
-        MotorDemo_Process(&demo, &service, now);
-        AppTouch_Process(HAL_GetTick());
-        MotorUi_Process(&service.data, MotorDemo_StateName(&demo), HAL_GetTick());
-        */
+        /* QR bring-up: read-only motor polling; automatic demo remains disabled.
+           motor_demo.c/config/project references and its tests are preserved. */
+        QrApp_Process(&app, HAL_GetTick());
     }
 }
 

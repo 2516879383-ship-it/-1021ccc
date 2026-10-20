@@ -5,4 +5,7 @@
 MotorTransport BspMotorUart_Init(void);
 void BspMotorUart_MspInit(UART_HandleTypeDef *uart);
 void BspMotorUart_Pump(MotorService *service, uint32_t now_ms);
+void BspMotorUart_RxEvent(void);
+void BspMotorUart_Error(void);
+void BspMotorUart_TxComplete(void);
 #endif

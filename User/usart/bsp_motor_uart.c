@@ -151,11 +151,6 @@ void UART5_IRQHandler(void)
 }
 void DMA1_Stream0_IRQHandler(void) { HAL_DMA_IRQHandler(&rx_dma); }
 void DMA1_Stream7_IRQHandler(void) { HAL_DMA_IRQHandler(&tx_dma); }
-void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *uart)
-{ if (uart->Instance == UART5) drain_dma(); }
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
-{ if (uart->Instance == UART5) drain_dma(); }
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
-{ if (uart->Instance == UART5) { ++uart_errors; restart_rx = 1u; } }
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *uart)
-{ if (uart->Instance == UART5) tx_in_flight = 0u; }
+void BspMotorUart_RxEvent(void) { drain_dma(); }
+void BspMotorUart_Error(void) { ++uart_errors; restart_rx = 1u; }
+void BspMotorUart_TxComplete(void) { tx_in_flight = 0u; }

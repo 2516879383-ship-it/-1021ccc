@@ -24,6 +24,11 @@ $busArgs = ($busSources | ForEach-Object { '"' + $_ + '"' }) -join ' '
 $busCommand = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /nologo /W4 /WX /std:c11 /D_CRT_SECURE_NO_WARNINGS /I"' + (Join-Path $projectRoot 'User') + '" ' + $busArgs + ' /Fe:bus_tests.exe && bus_tests.exe'
 & $env:ComSpec /d /s /c $busCommand
 if ($LASTEXITCODE -ne 0) { throw 'Multi-motor host tests failed' }
+# Same bus tests compiled with the pre-relaxation gates restored, so both the
+# relaxed defaults and the old strict behaviour stay covered.
+$busLegacyCommand = 'call "' + $vcvars + '" >nul && cd /d "' + $testOutput + '" && cl /nologo /W4 /WX /std:c11 /D_CRT_SECURE_NO_WARNINGS /DMOTOR_DRIVER_REQUIRE_MANUAL=1 /DMOTOR_BENCH_JOG_ENABLED=0 /DMOTOR_UNKNOWN_AUTO_RECOVER_MS=0 /I"' + (Join-Path $projectRoot 'User') + '" ' + $busArgs + ' /Fe:bus_legacy_tests.exe && bus_legacy_tests.exe'
+& $env:ComSpec /d /s /c $busLegacyCommand
+if ($LASTEXITCODE -ne 0) { throw 'Legacy strict-gate bus tests failed' }
 $uartSources = @('Tests\test_motor_uart.c', 'User\usart\bsp_motor_uart.c', 'User\usart\bsp_uart_callbacks.c',
     'User\motor\emm_protocol.c', 'User\motor\motor_bus.c', 'User\motor\motor_service.c') | ForEach-Object { Join-Path $projectRoot $_ }
 $uartArgs = ($uartSources | ForEach-Object { '"' + $_ + '"' }) -join ' '

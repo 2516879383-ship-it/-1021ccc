@@ -29,4 +29,26 @@
 #define MOTOR_SYNC_CLEAN_BOOT_CONFIRMED 0u
 #define MOTOR_POSITION_TOLERANCE_COUNTS 128u
 #define MOTOR_STOP_TIMEOUT_MS 3000u
+
+/* Gate relaxations (2026-10-21). Each macro can be overridden from the build to
+   restore the old strict behaviour; anything not overridden uses the relaxed
+   default below.
+   MOTOR_DRIVER_REQUIRE_MANUAL: 1 = motion APIs require MotorBus_SetManual(1)
+   again. 0 = driver accepts commands from any explicit caller; the UI keeps its
+   own MANUAL/READ ONLY gate and the caller owns the explicit-intent policy.
+   MOTOR_BENCH_JOG_ENABLED: 1 = a single-axis SPEED jog is allowed even while
+   MOTOR_TEST_CONFIGURED=0 (same 10 RPM / 1 s template); position, wheels and
+   sync stay gated. 0 = restore "CONFIGURE" rejection for all motion.
+   MOTOR_UNKNOWN_AUTO_RECOVER_MS: settle window in ms used to leave UNKNOWN
+   after fresh stopped, fault-free feedback arrives. 0 = keep UNKNOWN until an
+   explicit stop verifies it. */
+#ifndef MOTOR_DRIVER_REQUIRE_MANUAL
+#define MOTOR_DRIVER_REQUIRE_MANUAL 0u
+#endif
+#ifndef MOTOR_BENCH_JOG_ENABLED
+#define MOTOR_BENCH_JOG_ENABLED 1u
+#endif
+#ifndef MOTOR_UNKNOWN_AUTO_RECOVER_MS
+#define MOTOR_UNKNOWN_AUTO_RECOVER_MS 500u
+#endif
 #endif

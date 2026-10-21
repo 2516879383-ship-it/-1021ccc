@@ -61,7 +61,11 @@ void MotorBus_Init(MotorBus *b, MotorTransport t, uint32_t now);
 void MotorBus_Process(MotorBus *b, uint32_t now);
 void MotorBus_Receive(MotorBus *b, const uint8_t *bytes, size_t count, uint32_t now);
 void MotorBus_TransportError(MotorBus *b, MotorError error, uint32_t now);
-/* All motion requires an explicit manual session, fresh healthy feedback and a lease/timeout. */
+/* Motion still requires fresh, healthy, enabled feedback plus a lease/timeout.
+   The MANUAL flag is a UI-facing explicit-intent state: when
+   MOTOR_DRIVER_REQUIRE_MANUAL is 0 (default) programmatic callers may command
+   motion without it, and the caller owns its own explicit-intent/safety policy.
+   Leaving MANUAL still requests a full stop. */
 void MotorBus_SetManual(MotorBus *b, uint8_t manual, uint32_t now);
 int MotorBus_Enable(MotorBus *b, uint8_t address, uint8_t enabled, uint32_t now);
 int MotorBus_Submit(MotorBus *b, const MotorAction *action, uint32_t now);

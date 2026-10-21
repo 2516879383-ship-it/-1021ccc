@@ -110,12 +110,20 @@ static int set_target(MotorNode *n, const MotorAction *a, uint32_t now)
 static int enqueue(MotorBus *b, MotorRequest r, uint32_t now)
 {
     unsigned i;
-    if (!b->manual || b->queue_count == MOTOR_BUS_QUEUE || b->sync_state == MOTOR_SYNC_PREPARE ||
-        b->sync_state == MOTOR_SYNC_TRIGGER || b->sync_state == MOTOR_SYNC_VERIFY ||
-        (b->stop_mask & r.mask)) { b->message = "BUSY / MANUAL REQUIRED"; return 0; }
-    for (i = 0u; i < b->queue_count; ++i) if (b->queue[i].mask & r.mask) return 0;
+#if MOTOR_DRIVER_REQUIRE_MANUAL
+    if (!b->manual) { b->message = "MANUAL REQUIRED"; return 0; }
+#endif
+    if (b->queue_count == MOTOR_BUS_QUEUE) { b->message = "QUEUE FULL"; return 0; }
+    if (b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER ||
+        b->sync_state == MOTOR_SYNC_VERIFY) { b->message = "SYNC BUSY"; return 0; }
+    if (b->stop_mask & r.mask) { b->message = "STOP PENDING"; return 0; }
+    for (i = 0u; i < b->queue_count; ++i) if (b->queue[i].mask & r.mask) {
+        b->message = "AXIS BUSY"; return 0;
+    }
     if ((b->pending && b->active.kind != QUERY && b->active.kind != DIAGNOSTIC &&
-        (b->active.mask & r.mask)) || (b->wheels_pending && (r.mask & MOTOR_WHEELS))) return 0;
+        (b->active.mask & r.mask)) || (b->wheels_pending && (r.mask & MOTOR_WHEELS))) {
+        b->message = "AXIS BUSY"; return 0;
+    }
     r.id = new_id(b); r.expires_ms = now + (r.code == EMM_VELOCITY ? r.action.lease_ms : 1000u);
     b->queue[b->queue_count++] = r;
     state(b, r.mask, MOTOR_QUEUED, r.id, now); b->message = "QUEUED"; return 1;
@@ -147,7 +155,11 @@ int MotorBus_Wheels(MotorBus *b, const int32_t rpm[4], uint8_t acc, uint32_t lea
     MotorRequest r;
     unsigned i;
     memset(&r, 0, sizeof(r));
-    if (!b->manual || lease < 100u || lease > 5000u || !Emm_Wheels(&r.action.command, rpm, acc) ||
+#if MOTOR_DRIVER_REQUIRE_MANUAL
+    if (!b->manual) { b->message = "WHEELS NOT READY"; return 0; }
+#endif
+    if (lease < 100u || lease > 5000u ||
+        !Emm_Wheels(&r.action.command, rpm, acc) ||
         !healthy(b, MOTOR_WHEELS, now, 1u) || (b->stop_mask & MOTOR_WHEELS) ||
         b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER ||
         b->sync_state == MOTOR_SYNC_VERIFY) { b->message = "WHEELS NOT READY"; return 0; }
@@ -164,7 +176,11 @@ int MotorBus_Sync(MotorBus *b, const MotorAction *a, uint8_t count, uint32_t now
 {
     unsigned i;
     uint8_t mask = 0u;
-    if (!b->manual || b->sync_locked || !a || !count || count > MOTOR_COUNT || b->queue_count ||
+#if MOTOR_DRIVER_REQUIRE_MANUAL
+    if (!b->manual) { b->message = "SYNC LOCKED / BUSY"; return 0; }
+#endif
+    if (b->sync_locked || !a || !count ||
+        count > MOTOR_COUNT || b->queue_count ||
         b->wheels_pending || b->stop_mask || b->sync_state == MOTOR_SYNC_PREPARE ||
         b->sync_state == MOTOR_SYNC_TRIGGER || b->sync_state == MOTOR_SYNC_VERIFY) {
         b->message = "SYNC LOCKED / BUSY"; return 0;
@@ -359,12 +375,36 @@ static void monitor(MotorBus *b)
             MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) &&
             MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) && n->data.speed_rpm == 0 &&
             !(n->data.status_flags & 0x0Cu)) n->action = MOTOR_STOPPED;
-        else if (n->action == MOTOR_STOP_PENDING && due(b->now_ms, n->deadline_ms)) n->action = MOTOR_UNKNOWN;
+        else if (n->action == MOTOR_STOP_PENDING && due(b->now_ms, n->deadline_ms)) {
+            n->action = MOTOR_UNKNOWN; n->action_ms = b->now_ms;
+        }
         if (n->data.command_code == EMM_ENABLE && n->action == MOTOR_ACCEPTED) {
             if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) &&
                 due(n->data.status_ms, n->action_ms + 1u) &&
                 (n->data.status_flags & 1u) == n->requested_enable) n->action = MOTOR_COMPLETE;
-            else if (due(b->now_ms, n->deadline_ms)) n->action = MOTOR_UNKNOWN;
+            else if (due(b->now_ms, n->deadline_ms)) {
+                n->action = MOTOR_UNKNOWN; n->action_ms = b->now_ms;
+            }
+        }
+        if (n->action == MOTOR_UNKNOWN && !n->motion) {
+#if MOTOR_UNKNOWN_AUTO_RECOVER_MS
+            /* Leave UNKNOWN only after fresh, post-UNKNOWN evidence proves a safe
+               stopped state: online, enabled-state known, zero speed, no stall or
+               protection flag and the isolation window has passed. */
+            if (n->data.online && MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) &&
+                MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) &&
+                due(n->data.status_ms, n->action_ms) && due(n->data.speed_ms, n->action_ms) &&
+                due(b->now_ms, n->action_ms + MOTOR_UNKNOWN_AUTO_RECOVER_MS) &&
+                due(b->now_ms, n->quiet_until) && !(n->data.status_flags & 0x0Cu) &&
+                n->data.speed_rpm == 0) {
+                if (n->data.status_flags & 1u) {
+                    n->action = MOTOR_STOPPED; b->message = "UNKNOWN RECOVERED / STOPPED";
+                } else {
+                    n->action = MOTOR_IDLE; b->message = "UNKNOWN RECOVERED / IDLE";
+                }
+            }
+#endif
+            continue;
         }
         if (!n->motion) continue;
         if (!n->data.online || !MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) ||

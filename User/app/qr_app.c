@@ -93,35 +93,48 @@ static void manual_action(QrApp *a, QrUiAction action, uint32_t now)
     else if (action == QR_UI_STOP_WHEELS) MotorBus_Stop(&a->motor, MOTOR_WHEELS, now);
     else if (action == QR_UI_STOP_AXIS) MotorBus_Stop(&a->motor, (uint8_t)(1u << a->ui.selected), now);
     else if (action == QR_UI_RUN && a->motor.manual) {
-#if MOTOR_TEST_CONFIGURED
-        MotorAction m;
-#endif
         if (a->ui.test_action == 0u) { (void)MotorBus_Enable(&a->motor, address, 1u, now); return; }
+#if MOTOR_TEST_CONFIGURED || MOTOR_BENCH_JOG_ENABLED
+        {
+            MotorAction m;
+            memset(&m, 0, sizeof(m));
+            m.lease_ms = MOTOR_TEST_LEASE_MS; m.timeout_ms = MOTOR_TEST_POSITION_TIMEOUT_MS;
+            m.pulses_per_rev = MOTOR_TEST_PULSES_PER_REV;
 #if MOTOR_TEST_CONFIGURED
-        memset(&m, 0, sizeof(m));
-        m.lease_ms = MOTOR_TEST_LEASE_MS; m.timeout_ms = MOTOR_TEST_POSITION_TIMEOUT_MS;
-        m.pulses_per_rev = MOTOR_TEST_PULSES_PER_REV;
-        if (a->ui.test_action == 1u) {
-            m.command = Emm_VelocityEx(address, MOTOR_TEST_DIRECTION, MOTOR_TEST_RPM, MOTOR_TEST_ACCELERATION, 0u);
-            (void)MotorBus_Submit(&a->motor, &m, now);
-        } else if (a->ui.test_action == 2u) {
-            if (address < 5u) { a->motor.message = "POSITION: SELECT AXIS 5..7"; return; }
-            m.command = Emm_MoveEx(address, MOTOR_TEST_DIRECTION, MOTOR_TEST_RPM, MOTOR_TEST_ACCELERATION,
-                MOTOR_TEST_PULSES, MOTOR_TEST_POSITION_MODE, 0u);
-            (void)MotorBus_Submit(&a->motor, &m, now);
-        } else {
-            const int32_t rpm[4] = MOTOR_TEST_WHEEL_RPM;
-            if (a->ui.test_action == 3u) (void)MotorBus_Wheels(&a->motor, rpm, MOTOR_TEST_ACCELERATION, MOTOR_TEST_LEASE_MS, now);
-            else {
-                MotorAction group[4];
-                unsigned i;
-                for (i = 0u; i < 4u; ++i) {
-                    group[i] = m;
-                    group[i].command = Emm_VelocityEx((uint8_t)(i + 1u), (uint8_t)(rpm[i] < 0),
-                        (uint16_t)(rpm[i] < 0 ? -rpm[i] : rpm[i]), MOTOR_TEST_ACCELERATION, 1u);
+            if (a->ui.test_action == 1u) {
+                m.command = Emm_VelocityEx(address, MOTOR_TEST_DIRECTION, MOTOR_TEST_RPM, MOTOR_TEST_ACCELERATION, 0u);
+                (void)MotorBus_Submit(&a->motor, &m, now);
+            } else if (a->ui.test_action == 2u) {
+                if (address < 5u) { a->motor.message = "POSITION: SELECT AXIS 5..7"; return; }
+                m.command = Emm_MoveEx(address, MOTOR_TEST_DIRECTION, MOTOR_TEST_RPM, MOTOR_TEST_ACCELERATION,
+                    MOTOR_TEST_PULSES, MOTOR_TEST_POSITION_MODE, 0u);
+                (void)MotorBus_Submit(&a->motor, &m, now);
+            } else {
+                const int32_t rpm[4] = MOTOR_TEST_WHEEL_RPM;
+                if (a->ui.test_action == 3u) (void)MotorBus_Wheels(&a->motor, rpm, MOTOR_TEST_ACCELERATION, MOTOR_TEST_LEASE_MS, now);
+                else {
+                    MotorAction group[4];
+                    unsigned i;
+                    for (i = 0u; i < 4u; ++i) {
+                        group[i] = m;
+                        group[i].command = Emm_VelocityEx((uint8_t)(i + 1u), (uint8_t)(rpm[i] < 0),
+                            (uint16_t)(rpm[i] < 0 ? -rpm[i] : rpm[i]), MOTOR_TEST_ACCELERATION, 1u);
+                    }
+                    (void)MotorBus_Sync(&a->motor, group, 4u, now);
                 }
-                (void)MotorBus_Sync(&a->motor, group, 4u, now);
             }
+#else
+            /* Bench jog: an explicit MANUAL + RUN ONCE with a short low-speed
+               lease remains available while MOTOR_TEST_CONFIGURED=0. Position,
+               0xAA wheel group and sync stay gated by MOTOR_TEST_CONFIGURED. */
+            if (a->ui.test_action == 1u) {
+                m.command = Emm_VelocityEx(address, MOTOR_TEST_DIRECTION, MOTOR_TEST_RPM,
+                    MOTOR_TEST_ACCELERATION, 0u);
+                (void)MotorBus_Submit(&a->motor, &m, now);
+            } else {
+                a->motor.message = "CONFIGURE: POSITION/GROUP/SYNC";
+            }
+#endif
         }
 #else
         a->motor.message = "CONFIGURE motor_test_config.h";

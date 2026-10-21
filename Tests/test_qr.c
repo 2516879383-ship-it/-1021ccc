@@ -395,7 +395,12 @@ static void test_seven_ui(void)
     click(&a,20,140,30006u); CHECK(a.ui.test_action==1u);
     click(&a,20,184,30008u);
     CHECK(motion_sends==before);
-#if !MOTOR_TEST_CONFIGURED
+#if MOTOR_TEST_CONFIGURED
+    CHECK(strstr(a.motor.message,"NEED"));
+#elif MOTOR_BENCH_JOG_ENABLED
+    /* Bench jog reaches Submit but still requires healthy feedback. */
+    CHECK(strstr(a.motor.message,"NEED"));
+#else
     CHECK(strstr(a.motor.message,"CONFIGURE"));
 #endif
     /* UI edge detection applies equally to one-shot position and group actions. */
@@ -453,6 +458,41 @@ static void test_configured_actions(void)
     CHECK(app_commands[EMM_MULTI]==before+1u && app_length==37u && app_last[3]==37u);
     manual_fixture(&a,43000u,4u,0u); before=app_commands[EMM_SYNC];
     click(&a,20,184,43000u); CHECK(app_commands[EMM_SYNC]==before && strstr(a.motor.message,"LOCKED"));
+    CHECK(!bad_layout);
+}
+#endif
+#if !MOTOR_TEST_CONFIGURED && MOTOR_BENCH_JOG_ENABLED
+static void bench_jog_fixture(QrApp *a,uint32_t now,uint8_t action,uint8_t selected)
+{
+    MotorTransport t={0,motor_send,motor_busy}; unsigned i,j;
+    QrApp_Init(a,t,1u,now); a->ui.motor_page=a->ui.detail=1u;
+    a->ui.test_action=action; a->ui.selected=selected;
+    MotorBus_SetManual(&a->motor,1u,now);
+    for(i=0;i<7u;++i) {
+        MotorSnapshot *d=&a->motor.nodes[i].data;
+        d->valid=7u; d->online=1u; d->status_flags=3u; d->rx_count=1u;
+        d->position_ms=d->speed_ms=d->status_ms=d->last_rx_ms=now;
+        for(j=0;j<3u;++j) a->motor.nodes[i].poll_due[j]=now+10000u;
+    }
+}
+/* MOTOR_TEST_CONFIGURED=0 keeps POSITION/WHEELS/SYNC gated but allows an
+   explicit MANUAL + RUN ONCE single-axis SPEED jog. */
+static void test_bench_jog(void)
+{
+    QrApp a; unsigned before;
+    bench_jog_fixture(&a,50000u,1u,0u); before=app_commands[EMM_VELOCITY];
+    click(&a,20,184,50000u);
+    CHECK(app_commands[EMM_VELOCITY]==before+1u && app_last[0]==1u && app_length==8u &&
+        app_last[2]==MOTOR_TEST_DIRECTION && app_last[5]==MOTOR_TEST_ACCELERATION);
+    bench_jog_fixture(&a,51000u,2u,4u); before=app_commands[EMM_MOVE];
+    click(&a,20,184,51000u);
+    CHECK(app_commands[EMM_MOVE]==before && strstr(a.motor.message,"CONFIGURE"));
+    bench_jog_fixture(&a,52000u,3u,0u); before=app_commands[EMM_MULTI];
+    click(&a,20,184,52000u);
+    CHECK(app_commands[EMM_MULTI]==before && strstr(a.motor.message,"CONFIGURE"));
+    bench_jog_fixture(&a,53000u,4u,0u); before=app_commands[EMM_SYNC];
+    click(&a,20,184,53000u);
+    CHECK(app_commands[EMM_SYNC]==before && strstr(a.motor.message,"CONFIGURE"));
     CHECK(!bad_layout);
 }
 #endif
@@ -576,6 +616,9 @@ int main(int argc,char **argv)
     test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui();
 #if MOTOR_TEST_CONFIGURED
     test_configured_actions();
+#endif
+#if !MOTOR_TEST_CONFIGURED && MOTOR_BENCH_JOG_ENABLED
+    test_bench_jog();
 #endif
     printf("PASS: %u QR checks (parser, sessions, real BSP/callbacks, app, UI)\n",checks);
     return 0;

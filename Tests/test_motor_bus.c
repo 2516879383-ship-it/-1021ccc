@@ -1,4 +1,5 @@
 #include "motor/motor_bus.h"
+#include "motor/motor_test_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,8 +188,11 @@ static void groups_stops(void)
     Sim s; int32_t rpm[4]={10,-12,14,-16}, newer[4]={11,-13,15,-17}; unsigned i;
     uint32_t start_samples;
     uint8_t wrong[]={2,EMM_VELOCITY,2,0x6B}, done[]={1,EMM_VELOCITY,0x9F,0x6B};
-    init(&s); CHECK(!MotorBus_Wheels(&s.bus,rpm,100,1000,s.now));
+    init(&s);
+#if MOTOR_DRIVER_REQUIRE_MANUAL
+    CHECK(!MotorBus_Wheels(&s.bus,rpm,100,1000,s.now));
     MotorBus_SetManual(&s.bus,1,s.now);
+#endif
     CHECK(MotorBus_Wheels(&s.bus,rpm,100,1000,s.now));
     CHECK(MotorBus_Wheels(&s.bus,newer,100,1000,s.now));
     run(&s,200); CHECK(s.groups==1u && s.bus.group_ack==2u && s.rpm[0]==11 && s.rpm[3]==-17);
@@ -314,9 +318,76 @@ static void isolation_wrap(void)
     CHECK(s.now<3000u && !s.motions);
     for(i=0;i<7;++i) CHECK(s.bus.nodes[i].data.online && s.bus.nodes[i].data.valid==7u);
 }
+#if !MOTOR_DRIVER_REQUIRE_MANUAL
+/* Relaxed gate: motion APIs work without a manual session, but feedback gates
+   (enabled, fresh, fault-free, no UNKNOWN/STOP_PENDING) must still reject. */
+static void programmatic_control(void)
+{
+    Sim s; MotorAction m; int32_t rpm[4]={10,-12,14,-16};
+    init(&s);
+    CHECK(!s.bus.manual);
+    CHECK(MotorBus_Enable(&s.bus,5u,1u,s.now));
+    run(&s,1500u);
+    CHECK(s.bus.nodes[4].action==MOTOR_COMPLETE);
+    init(&s); m=speed(5u,0u);
+    CHECK(MotorBus_Submit(&s.bus,&m,s.now));
+    run(&s,1500u);
+    CHECK(s.sends[5][EMM_VELOCITY]==1u);
+    init(&s);
+    CHECK(MotorBus_Wheels(&s.bus,rpm,100u,1000u,s.now));
+    run(&s,200u); CHECK(s.groups==1u);
+    /* Gate relaxation must not weaken the feedback gates. */
+    init(&s); s.flags[0]&=0xFEu; run(&s,700u);
+    CHECK(!MotorBus_Wheels(&s.bus,rpm,100u,1000u,s.now));
+    init(&s); s.flags[0]|=0x04u; run(&s,700u);
+    CHECK(!MotorBus_Wheels(&s.bus,rpm,100u,1000u,s.now));
+    init(&s); s.bus.nodes[0].data.status_ms=s.now-(MOTOR_BUS_FRESH_MS+1u);
+    CHECK(!MotorBus_Wheels(&s.bus,rpm,100u,1000u,s.now));
+}
+#endif
+
+#if MOTOR_UNKNOWN_AUTO_RECOVER_MS
+/* UNKNOWN leaves only on fresh, post-UNKNOWN stopped/no-fault feedback; unsafe
+   evidence (still spinning, fault flags) keeps it blocking. */
+static void unknown_recovery(void)
+{
+    Sim s; MotorAction m;
+    init(&s); m=speed(1u,0u); CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,200u);
+    s.online &= 0x7Eu; run(&s,4200u);
+    CHECK(s.bus.nodes[0].action==MOTOR_UNKNOWN);
+    s.online |= 1u; s.rpm[0]=0; s.arrive[0]=0u; s.flags[0]=3u;
+    run(&s,3200u);
+    CHECK(s.bus.nodes[0].action==MOTOR_STOPPED);
+    m=speed(1u,0u); CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,300u);
+    init(&s); m=speed(2u,0u); CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,200u);
+    s.online &= 0xFDu; run(&s,4200u);
+    CHECK(s.bus.nodes[1].action==MOTOR_UNKNOWN);
+    s.online |= 2u; s.flags[1]=2u; s.rpm[1]=10; s.arrive[1]=0u;
+    run(&s,800u); s.rpm[1]=0;
+    run(&s,3200u);
+    CHECK(s.bus.nodes[1].action==MOTOR_IDLE);
+    CHECK(MotorBus_Enable(&s.bus,2u,1u,s.now));
+    init(&s); m=speed(3u,0u); CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,200u);
+    s.online &= 0xFBu; run(&s,4200u);
+    CHECK(s.bus.nodes[2].action==MOTOR_UNKNOWN);
+    s.online |= 4u; s.flags[2]=3u; s.rpm[2]=10; s.arrive[2]=0u;
+    run(&s,3200u);
+    CHECK(s.bus.nodes[2].action==MOTOR_UNKNOWN);
+    m=speed(3u,0u); CHECK(!MotorBus_Submit(&s.bus,&m,s.now));
+    s.flags[2]=0x0Bu; run(&s,800u); s.rpm[2]=0; run(&s,3200u);
+    CHECK(s.bus.nodes[2].action==MOTOR_UNKNOWN);
+}
+#endif
+
 int main(void)
 {
     protocol(); polling(); groups_stops(); positions(); synchronous(); transport(); isolation_wrap();
+#if !MOTOR_DRIVER_REQUIRE_MANUAL
+    programmatic_control();
+#endif
+#if MOTOR_UNKNOWN_AUTO_RECOVER_MS
+    unknown_recovery();
+#endif
     printf("PASS: %u multi-motor checks (protocol, seven nodes, scheduling, faults, stop, sync)\n",checks);
     return 0;
 }

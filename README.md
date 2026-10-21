@@ -2,6 +2,9 @@
 
 更新日期：2026-10-21。
 
+2026-10-21 光流增补（独立分支 `feature/pmw3901-flow`，已合入电机 `da96ca9`）：已接入 SPI2 PMW3901 分步初始化、Motion Burst、有符号计数/64位累计、质量与新鲜度、清零、退避恢复及 FLOW/MORE 页面；复用当前 QrApp，保留四轮上电测试、最新手动门控和扫码/PB12。软件主机回归、七机/扫码/光流并行替身及 Keil AC5 0错误0警告已通过，未烧录/未做实物或mm标定。模块 MIS/MOS 图片命名与原理图有歧义，按芯片方向复核后接线。接线、操作、逐文件理由、证据和实物待验项见 [OPTICAL_FLOW.md](Doc/OPTICAL_FLOW.md)；以下历史“未实现光流”条目保留为当时记录，以本增补为准。
+
+
 本次小过程增补：按用户新要求，初始化后确认 1～4 号新鲜反馈并依次使能，以 10 RPM、1 秒间隔按 1→2→3→4 启动，再按 1→2→3→4 停止；每次上电/复位只执行一次，完成后恢复只读。5～7 号不发控制命令，扫码/显示继续；STOP 或异常中止且不自动重试。`User/motor/motor_test_config.h` 的 `MOTOR_BOOT_SEQUENCE_ENABLED=1` 默认开启，置 0 恢复此前只读上电；本次行为优先于下文历史阶段的“上电只读”描述。实物运行效果待验证。
 
 2026-10-21 门控放宽：驱动层运动 API 不再强制 UI 的 MANUAL 会话（UI 的 READ ONLY/MANUAL 语义不变，程序化调用方自行保证显式意图）；`UNKNOWN` 节点在收到新的零速/无故障反馈并过稳定窗后自动恢复；`MOTOR_TEST_CONFIGURED=0` 时允许 MANUAL 下单轴 10 RPM/1 s 点动，位置/四轮/同步仍需启用参数。三个开关均可通过 `MOTOR_DRIVER_REQUIRE_MANUAL`、`MOTOR_BENCH_JOG_ENABLED`、`MOTOR_UNKNOWN_AUTO_RECOVER_MS` 恢复旧行为，详见 MULTI_MOTOR.md。

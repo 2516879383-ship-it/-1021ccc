@@ -1,0 +1,132 @@
+test_motor.c
+test_ui.c
+motor_ui.c
+font16.c
+emm_protocol.c
+motor_bus.c
+motor_demo.c
+motor_service.c
+正在生成代码...
+PASS: UI no-data, negative values, stale data, partial redraw and 480x272 bounds
+PASS: 70 checks (protocol + service + automatic demo)
+test_qr.c
+flow_app_stub.c
+pmw3901.c
+flow_service.c
+flow_ui.c
+qr_ui.c
+qr_app.c
+app_runtime.c
+bsp_qr_uart.c
+bsp_qr_trigger.c
+bsp_uart_callbacks.c
+emm_protocol.c
+motor_service.c
+motor_bus.c
+font16.c
+font24.c
+qr_service.c
+qr_stream.c
+qr_task_code.c
+正在生成代码...
+FLOW concurrent UI: interval max 10 ms, missed 0, process max 1028 us (simulated)
+PASS: 1091 QR checks (parser, sessions, real BSP/callbacks, app, UI)
+PASS: QR startup failure (init)
+PASS: QR startup failure (dma)
+PASS: QR startup failure (receive)
+PASS: QR startup failure (start)
+test_motor_bus.c
+emm_protocol.c
+motor_bus.c
+正在生成代码...
+METRIC healthy: 315 TX + 630 RX bytes in 2500 ms; max feedback gaps 501 501 501 ms
+METRIC max field ages: 500/500/500 ms
+METRIC node 1 offline: node 7 max feedback gaps 526/513/501 ms; timeouts 5
+METRIC 10Hz producer: 20 groups/2000 ms, wheel speed samples 10; no timeouts 0
+PASS: 7499 multi-motor checks (protocol, seven nodes, scheduling, faults, stop, sync)
+test_motor_bus.c
+emm_protocol.c
+motor_bus.c
+正在生成代码...
+METRIC healthy: 315 TX + 630 RX bytes in 2500 ms; max feedback gaps 501 501 501 ms
+METRIC max field ages: 500/500/500 ms
+METRIC node 1 offline: node 7 max feedback gaps 526/513/501 ms; timeouts 5
+METRIC 10Hz producer: 20 groups/2000 ms, wheel speed samples 10; no timeouts 0
+PASS: 5215 multi-motor checks (protocol, seven nodes, scheduling, faults, stop, sync)
+test_motor_uart.c
+bsp_motor_uart.c
+bsp_uart_callbacks.c
+emm_protocol.c
+motor_bus.c
+motor_service.c
+正在生成代码...
+PASS: 24 real UART5 BSP checks (DMA lifetime, length watchdog, budget, overflow, callbacks)
+PASS: UART5 init failure
+PASS: UART5 init failure
+PASS: UART5 RX failure/recovery
+test_qr.c
+flow_app_stub.c
+pmw3901.c
+flow_service.c
+flow_ui.c
+qr_ui.c
+qr_app.c
+app_runtime.c
+bsp_qr_uart.c
+bsp_qr_trigger.c
+bsp_uart_callbacks.c
+emm_protocol.c
+motor_service.c
+motor_bus.c
+font16.c
+font24.c
+qr_service.c
+qr_stream.c
+qr_task_code.c
+正在生成代码...
+FLOW concurrent UI: interval max 10 ms, missed 0, process max 1028 us (simulated)
+PASS: 1091 QR checks (parser, sessions, real BSP/callbacks, app, UI)
+PASS: QR startup failure (init)
+PASS: QR startup failure (dma)
+PASS: QR startup failure (receive)
+PASS: QR startup failure (start)
+test_qr.c
+flow_app_stub.c
+pmw3901.c
+flow_service.c
+flow_ui.c
+qr_ui.c
+qr_app.c
+app_runtime.c
+bsp_qr_uart.c
+bsp_qr_trigger.c
+bsp_uart_callbacks.c
+emm_protocol.c
+motor_service.c
+motor_bus.c
+font16.c
+font24.c
+qr_service.c
+qr_stream.c
+qr_task_code.c
+正在生成代码...
+BOOT timeline start: 1354/2355/3356/4357; stop: 5358/6359/7360/8361 ms
+FLOW seven-motor/scanner: max interval 10 ms, missed 0, error 1, gap 1, max step 1028 us (simulated)
+PASS: 2451 boot checks (order, one-shot, missing motor, enable rejection, ACK loss, STOP, QR)
+test_flow.c
+pmw3901.c
+flow_service.c
+正在生成代码...
+FLOW simulated max process 672 us; sample interval 10 ms
+FLOW PASS 145781 checks
+test_flow.c
+pmw3901.c
+flow_service.c
+正在生成代码...
+FLOW simulated max process 672 us; sample interval 10 ms
+FLOW PASS 145781 checks
+test_flow_spi.c
+bsp_flow_spi.c
+pmw3901.c
+正在生成代码...
+FLOW SPI PASS 49 checks

@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-21",
+  "branch": "feature/pmw3901-flow",
+  "code_commit": "5165f38cfdff22e958f31f09ca6300cd31d292a6",
+  "merged_main": "da96ca9fbbf18dce6ad0e200fb9f224f6e83e768",
+  "target": "LCD",
+  "compiler": "Arm Compiler 5.06 update 7 build 960",
+  "build_errors": 0,
+  "build_warnings": 0,
+  "Code": 49024,
+  "RO_data": 17228,
+  "RW_data": 1616,
+  "ZI_data": 13600,
+  "hex_sha256": "0e76e5c79b0555d938417947580b7e38968c0ffdf8faeedb594e265d8f37379b",
+  "hardware_verified": false,
+  "simulated_step_max_us": 1028,
+  "simulated_sample_interval_ms": 10
+}

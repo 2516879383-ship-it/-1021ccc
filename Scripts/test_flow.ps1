@@ -13,3 +13,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Flow host tests failed' }
 $command = $base + '/DFLOW_SWAP_XY=1 /DFLOW_X_SIGN=-1 /DFLOW_Y_SIGN=-1 ' + ($sources -join ' ') + ' /Fe:flow_mapped_tests.exe && flow_mapped_tests.exe'
 & $env:ComSpec /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw 'Mapped flow tests failed' }
+
+$spiSources = @('Tests\test_flow_spi.c','User\flow\bsp_flow_spi.c','User\flow\pmw3901.c') | ForEach-Object { '"' + (Join-Path $projectRoot $_) + '"' }
+$command = $base + '/I"' + (Join-Path $projectRoot 'Tests\flow_stubs') + '" ' + ($spiSources -join ' ') + ' /Fe:flow_spi_tests.exe && flow_spi_tests.exe'
+& $env:ComSpec /d /s /c $command
+if ($LASTEXITCODE -ne 0) { throw 'Flow SPI BSP tests failed' }

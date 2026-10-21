@@ -21,7 +21,7 @@ extern GPIO_TypeDef fake_gpioe;
 #define SPI_TIMODE_DISABLE 0u
 #define SPI_CRCCALCULATION_DISABLE 0u
 typedef struct { uint32_t Mode,Direction,DataSize,CLKPolarity,CLKPhase,NSS,BaudRatePrescaler,FirstBit,TIMode,CRCCalculation,CRCPolynomial; } SPI_InitTypeDef;
-typedef struct { SPI_TypeDef *Instance; SPI_InitTypeDef Init; } SPI_HandleTypeDef;
+struct SPI_HandleTypeDef { SPI_TypeDef *Instance; SPI_InitTypeDef Init; };
 typedef struct { uint32_t CTRL, CYCCNT; } FlowDwt;
 typedef struct { uint32_t DEMCR; } FlowDebug;
 extern FlowDwt fake_dwt;

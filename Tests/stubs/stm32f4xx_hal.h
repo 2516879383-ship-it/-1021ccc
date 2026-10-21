@@ -2,6 +2,8 @@
 #define HAL_TEST_STUB_H
 #include <stdint.h>
 #include <stddef.h>
+typedef struct SPI_HandleTypeDef SPI_HandleTypeDef;
+
 typedef enum { HAL_OK, HAL_ERROR, HAL_BUSY, HAL_TIMEOUT } HAL_StatusTypeDef;
 typedef struct { uint32_t SR; } USART_TypeDef;
 typedef struct { uint32_t count; } DMA_Stream_TypeDef;

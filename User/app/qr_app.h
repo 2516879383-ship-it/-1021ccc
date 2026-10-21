@@ -3,7 +3,7 @@
 #include "qr_ui.h"
 #include "./motor/motor_bus.h"
 typedef struct {
-    MotorBus motor; QrService qr; QrUi ui;
+    MotorBus motor; QrService qr; QrUi ui; FlowService flow;
     uint8_t boot_phase, boot_index, boot_waiting, boot_started, boot_stopping;
     uint32_t boot_due, boot_deadline;
 } QrApp;

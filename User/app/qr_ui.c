@@ -1,4 +1,5 @@
 #include "qr_ui.h"
+#include "./flow/flow_ui.h"
 #include "./lcd/bsp_lcd.h"
 #include <stdio.h>
 #include <string.h>
@@ -9,21 +10,21 @@ static void line(QrUi *u, unsigned i, const char *text)
 {
     if (!u->redraw && strcmp(u->previous[i], text) == 0) return;
     LCD_SetTextColor(LCD_COLOR_BLACK);
-    LCD_FillRect(8u, row_y[i], 464u, i == 2u ? 26u : 18u);
-    LCD_SetFont(i == 2u && !u->motor_page ? &Font24 : &Font16);
+    LCD_FillRect(8u, row_y[i], i == 0u ? 384u : 464u, i == 2u ? 26u : 18u);
+    LCD_SetFont(i == 2u && !u->motor_page && !u->flow_page ? &Font24 : &Font16);
     LCD_SetTextColor(LCD_COLOR_WHITE);
     LCD_DisplayStringAt(8u, row_y[i], (uint8_t *)text, LEFT_MODE);
     strncpy(u->previous[i], text, 42u); u->previous[i][42] = '\0';
 }
-static void buttons(uint8_t motor, uint8_t manual)
+static void buttons(uint8_t motor, uint8_t manual, uint8_t flow)
 {
     LCD_SetFont(&Font16); LCD_SetTextColor(LCD_COLOR_WHITE);
     LCD_FillRect(8u, 232u, 144u, 32u); LCD_FillRect(160u, 232u, 80u, 32u);
     LCD_FillRect(248u, 232u, 224u, 32u);
     LCD_SetTextColor(LCD_COLOR_BLACK); LCD_SetBackColor(LCD_COLOR_WHITE);
-    LCD_DisplayStringAt(20u, 240u, (uint8_t *)(motor ? (manual ? "READ ONLY" : "MANUAL") : "RESCAN"), LEFT_MODE);
+    LCD_DisplayStringAt(20u, 240u, (uint8_t *)(flow ? "CLEAR" : (motor ? (manual ? "READ ONLY" : "MANUAL") : "RESCAN")), LEFT_MODE);
     LCD_DisplayStringAt(168u, 240u, (uint8_t *)"STOP", LEFT_MODE);
-    LCD_DisplayStringAt(260u, 240u, (uint8_t *)(motor ? "QR" : "MOTOR"), LEFT_MODE);
+    LCD_DisplayStringAt(260u, 240u, (uint8_t *)(flow ? "BACK" : (motor ? "QR" : "MOTOR")), LEFT_MODE);
     LCD_SetBackColor(LCD_COLOR_BLACK);
 }
 void QrUi_Init(QrUi *u)
@@ -34,11 +35,20 @@ QrUiAction QrUi_Touch(QrUi *u, int32_t x, int32_t y, uint8_t down)
     uint8_t edge = (uint8_t)(down && !u->was_down);
     u->was_down = down;
     if (!edge || x < 8 || x >= 472 || y < 0 || y >= 264) return QR_UI_NONE;
+    if (x >= 400 && y >= 4 && y < 28) {
+        if (u->flow_page) u->flow_detail = (uint8_t)!u->flow_detail;
+        else { u->flow_page = 1u; u->flow_detail = 0u; }
+        u->redraw = 1u; return QR_UI_NONE;
+    }
     if (y >= 232) {
-        if (x >= 248) { u->motor_page = (uint8_t)!u->motor_page; u->redraw = 1u; }
+        if (x >= 248) {
+            if (u->flow_page) u->flow_page = 0u;
+            else u->motor_page = (uint8_t)!u->motor_page;
+            u->redraw = 1u;
+        }
         else if (x >= 160 && x < 240) return QR_UI_STOP_ALL;
-        else if (x < 152) { u->redraw = 1u; return u->motor_page ? QR_UI_MODE : QR_UI_RESCAN; }
-    } else if (u->motor_page) {
+        else if (x < 152) { u->redraw = 1u; return u->flow_page ? QR_UI_FLOW_CLEAR : (u->motor_page ? QR_UI_MODE : QR_UI_RESCAN); }
+    } else if (u->motor_page && !u->flow_page) {
         if (!u->detail) {
             unsigned i;
             for (i = 1u; i <= 7u; ++i) if (y >= row_y[i] && y < row_y[i] + 18) {
@@ -135,13 +145,23 @@ static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
     line(u, 7u, b->manual ? "RUN ONCE                  STOP AXIS" : "MANUAL REQUIRED           STOP AXIS");
     line(u, 8u, "STOP WHEELS               BACK");
 }
-void QrUi_Process(QrUi *u, const QrService *s, const MotorBus *motor, uint32_t now)
+void QrUi_Process(QrUi *u, const QrService *s, const MotorBus *motor, const FlowSnapshot *flow, uint32_t now)
 {
     if (!u->redraw && (uint32_t)(now - u->last_draw) < 100u) return;
     u->last_draw = now;
     if (u->redraw) {
-        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_Clear(LCD_COLOR_BLACK); buttons(u->motor_page, motor->manual);
+        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_Clear(LCD_COLOR_BLACK); buttons(u->motor_page, motor->manual, u->flow_page);
     }
-    if (u->motor_page) motor_page(u, motor, now); else qr_page(u, s, now);
+    if (u->flow_page) {
+        unsigned i; char t[43];
+        for (i = 0u; i < 9u; ++i) { FlowUi_Line(t, i, u->flow_detail, flow); line(u, i, t); }
+    } else if (u->motor_page) motor_page(u, motor, now); else qr_page(u, s, now);
+    if (u->redraw) {
+        LCD_SetFont(&Font16); LCD_SetTextColor(LCD_COLOR_WHITE);
+        LCD_FillRect(400u, 4u, 72u, 24u);
+        LCD_SetTextColor(LCD_COLOR_BLACK); LCD_SetBackColor(LCD_COLOR_WHITE);
+        LCD_DisplayStringAt(406u, 10u, (uint8_t *)(u->flow_page ? (u->flow_detail ? "DATA" : "MORE") : "FLOW"), LEFT_MODE);
+        LCD_SetBackColor(LCD_COLOR_BLACK);
+    }
     u->redraw = 0u;
 }

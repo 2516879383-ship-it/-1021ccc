@@ -381,6 +381,31 @@
       </TargetOption>
       <Groups>
         <Group>
+          <GroupName>FLOW</GroupName>
+          <Files>
+            <File>
+              <FileName>bsp_flow_spi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\flow\bsp_flow_spi.c</FilePath>
+            </File>
+            <File>
+              <FileName>pmw3901.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\flow\pmw3901.c</FilePath>
+            </File>
+            <File>
+              <FileName>flow_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\flow\flow_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>flow_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\flow\flow_ui.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>STARTUP</GroupName>
           <Files>
             <File>

@@ -1,5 +1,6 @@
 #include "qr_app.h"
 #include "app_runtime.h"
+#include "./flow/bsp_flow_spi.h"
 #include "./usart/bsp_qr_uart.h"
 #include "./usart/bsp_qr_trigger.h"
 #include "./usart/bsp_motor_uart.h"
@@ -87,7 +88,7 @@ static void boot_process(QrApp *a, uint32_t now)
 static void manual_action(QrApp *a, QrUiAction action, uint32_t now)
 {
     uint8_t address = (uint8_t)(a->ui.selected + 1u);
-    if (action >= QR_UI_MODE) boot_cancel(a, now);
+    if (action >= QR_UI_MODE && action <= QR_UI_STOP_ALL) boot_cancel(a, now);
     if (action == QR_UI_MODE) MotorBus_SetManual(&a->motor, (uint8_t)!a->motor.manual, now);
     else if (action == QR_UI_STOP_ALL) MotorBus_Stop(&a->motor, MOTOR_ALL, now);
     else if (action == QR_UI_STOP_WHEELS) MotorBus_Stop(&a->motor, MOTOR_WHEELS, now);
@@ -146,6 +147,7 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
 {
     MotorBus_Init(&a->motor, motor, now);
     QrService_Init(&a->qr, ready, now); QrUi_Init(&a->ui);
+    Flow_Init(&a->flow, BspFlowSpi_Io(), now);
     a->boot_phase = MOTOR_BOOT_SEQUENCE_ENABLED ? BOOT_READY : BOOT_DONE;
     a->boot_index = a->boot_waiting = a->boot_started = a->boot_stopping = 0u;
     a->boot_due = now; a->boot_deadline = now + 10000u;
@@ -154,6 +156,7 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
 void QrApp_Process(QrApp *a, uint32_t now)
 {
     int32_t x, y;
+    FlowSnapshot flow;
     uint8_t down;
     QrUiAction action;
     BspMotorUart_PumpBus(&a->motor, now);
@@ -164,10 +167,14 @@ void QrApp_Process(QrApp *a, uint32_t now)
     action = QrUi_Touch(&a->ui, x, y, down);
     if (action == QR_UI_RESCAN)
         BspQrUart_BeginSession(&a->qr, now);
+    else if (action == QR_UI_FLOW_CLEAR) Flow_ResetTotals(&a->flow);
     else manual_action(a, action, now);
     BspQrTrigger_Poll(now);
     BspQrUart_Pump(&a->qr, now);
     now = AppClock_Now(); /* Capture IRQs/touch I2C can advance SysTick during a step. */
     QrService_Process(&a->qr, now);
-    QrUi_Process(&a->ui, &a->qr, &a->motor, now);
+    Flow_Process(&a->flow, now);
+    now = AppClock_Now();
+    Flow_GetSnapshot(&a->flow, now, &flow);
+    QrUi_Process(&a->ui, &a->qr, &a->motor, &flow, now);
 }

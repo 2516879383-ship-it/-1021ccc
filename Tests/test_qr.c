@@ -370,7 +370,7 @@ static void test_app_ui(void)
     a.qr.data.accepted_seq=a.qr.data.accepted_ms=a.qr.data.frame_timeouts=UINT32_MAX;
     a.ui.redraw=1u; app_step(&a,20000u);
     CHECK(bad_layout==0u); /* include maximum 32-bit counters and both font sizes */
-    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor,21000u);
+    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor,0,21000u);
     CHECK(strstr(lines[1],"UART ERROR")!=0 && !strcmp(lines[2],"--"));
     save_image("qr_uart_error.pgm");
     QrApp_Init(&a,t,1u,22000u); CHECK(!a.qr.data.valid && a.qr.data.session==1u);
@@ -416,7 +416,7 @@ static void test_seven_ui(void)
     a.motor.nodes[4].data.position_counts=-INT64_C(4294967295);
     a.motor.nodes[4].target_counts=INT64_C(4294967295); a.motor.nodes[4].target_known=1u;
     a.motor.nodes[4].data.speed_rpm=INT32_MIN;
-    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,UINT32_MAX);
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,0,UINT32_MAX);
     CHECK(!bad_layout && strstr(lines[2],"-4294967295")); save_image("motor_detail_stale.pgm");
     a.ui.detail=0; a.ui.redraw=1u;
     for(i=0;i<7u;++i) {
@@ -424,7 +424,7 @@ static void test_seven_ui(void)
         d->valid=7u; d->online=1u; d->speed_rpm=(int32_t)i*10;
         d->status_flags=3u; d->speed_ms=d->status_ms=31000u;
     }
-    QrUi_Process(&a.ui,&a.qr,&a.motor,31000u); save_image("motor_seven_online.pgm");
+    QrUi_Process(&a.ui,&a.qr,&a.motor,0,31000u); save_image("motor_seven_online.pgm");
     click(&a,20,245,31002u); CHECK(!a.motor.manual && a.motor.stop_mask);
     CHECK(!bad_layout);
 }
@@ -559,10 +559,16 @@ static void test_boot_sequence(void)
     CHECK(MOTOR_BOOT_SEQUENCE_ENABLED && BspQrUart_Init());
     boot_fixture(&a,0u);
     for(now=0u;now<16000u;++now) {
+        if(now==3000u) { touch_x=420; touch_y=14; touch_down=1u; }
+        if(now==3001u || now==3101u || now==3201u || now==3301u) touch_down=0u;
+        if(now==3100u) { touch_x=20; touch_y=245; touch_down=1u; }
+        if(now==3200u) { touch_x=420; touch_y=14; touch_down=1u; }
+        if(now==3300u) { touch_x=300; touch_y=245; touch_down=1u; }
         if(now==3500u) inject("156+123+516+231\r",now,1);
         app_step(&a,now);
     }
     CHECK(boot_motor.count==12u && a.boot_phase==0u && !a.motor.manual);
+    CHECK(a.flow.data.clears==1u && !a.ui.flow_page && a.flow.data.valid);
     for(i=0;i<4u;++i) {
         CHECK(boot_motor.code[i]==EMM_ENABLE && boot_motor.address[i]==i+1u);
         CHECK(boot_motor.code[i+4u]==EMM_VELOCITY && boot_motor.address[i+4u]==i+1u);
@@ -585,7 +591,7 @@ static void test_boot_sequence(void)
     CHECK(boot_motor.count==before); /* no repeats after finish */
     boot_fixture(&a,22000u);
     for(now=22000u;now<30000u && !boot_starts();++now) app_step(&a,now);
-    CHECK(boot_starts()==1u); click(&a,170,245,now);
+    CHECK(boot_starts()==1u); click(&a,420,14,now); click(&a,170,245,now+2u);
     for(now+=2u;now<35000u;++now) app_step(&a,now);
     CHECK(a.boot_phase==0u && boot_starts()==1u && !boot_motor.rpm[0]);
     boot_fixture(&a,36000u); boot_motor.online=0x07u;
@@ -600,6 +606,56 @@ static void test_boot_sequence(void)
     CHECK(!bad_layout);
     printf("PASS: %u boot checks (order, one-shot, missing motor, enable rejection, ACK loss, STOP, QR)\n",checks);
 }
+
+void FlowTest_Fail(unsigned value);
+unsigned FlowTest_Bursts(void);
+static void test_flow_ui(void)
+{
+    QrApp a; MotorTransport t={0,motor_send,motor_busy};
+    FlowSnapshot d; uint32_t now; unsigned before=motion_sends, n; uint32_t session;
+    QrApp_Init(&a,t,1u,80000u); click(&a,420,14,80000u);
+    CHECK(a.ui.flow_page && !a.ui.motor_page && strstr(lines[1],"INIT")); save_image("flow_init.pgm");
+    for (now=80002u;now<81000u;++now) app_step(&a,now);
+    CHECK(a.flow.data.valid && strstr(lines[1],"READY") && !a.motor.manual && motion_sends==before);
+    save_image("flow_ready.pgm");
+    inject("156+123+516+231\r",81000u,1); app_step(&a,81000u);
+    CHECK(a.qr.data.valid); session=a.qr.data.session;
+    touch_x=20; touch_y=245; touch_down=1u;
+    for(now=81001u;now<81500u;++now) app_step(&a,now);
+    CHECK(a.flow.data.clears==1u && a.flow.data.zero_sequence>0u && a.qr.data.session==session);
+    CHECK(motion_sends==before && !a.motor.manual);
+    touch_down=0; app_step(&a,81500u);
+    click(&a,20,184,81501u); CHECK(motion_sends==before && !a.ui.detail); /* no motor row hit */
+    click(&a,420,14,81503u); CHECK(a.ui.flow_detail); save_image("flow_diagnostics.pgm");
+    FlowTest_Fail(1u);
+    for(now=81505u;now<81700u;++now) app_step(&a,now);
+    CHECK(a.flow.data.state==FLOW_ERROR && a.qr.data.valid && motion_sends==before);
+    save_image("flow_error.pgm");
+    click(&a,300,245,81700u); CHECK(!a.ui.flow_page && !a.ui.motor_page && !strcmp(lines[2],sample));
+    FlowTest_Fail(0u);
+    for(now=81702u;now<83500u;++now) app_step(&a,now);
+    CHECK(a.flow.data.valid && a.flow.data.segments==2u && a.flow.data.gaps && a.qr.data.valid);
+    n=FlowTest_Bursts(); click(&a,300,245,83500u); CHECK(a.ui.motor_page);
+    click(&a,420,14,83502u); CHECK(a.ui.flow_page && a.ui.motor_page);
+    CHECK(QrUi_Touch(&a.ui,20,184,1u)==QR_UI_NONE); (void)QrUi_Touch(&a.ui,20,184,0u);
+    for(now=83504u;now<83600u;++now) app_step(&a,now);
+    CHECK(FlowTest_Bursts()>n && !a.motor.manual);
+    /* Full 64-bit totals and maximum counters fit, including every diagnostic row. */
+    Flow_GetSnapshot(&a.flow,83600u,&d);
+    d.total_x=INT64_MIN; d.total_y=INT64_MAX;
+    d.accepted=d.rejected=d.errors=d.segments=d.gaps=d.missed=UINT32_MAX;
+    d.sequence=d.zero_sequence=d.max_process_us=d.max_interval_ms=d.clears=UINT32_MAX;
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,83600u);
+    CHECK(strstr(lines[3],"-9223372036854775808") && !bad_layout); save_image("flow_limits.pgm");
+    a.ui.flow_detail=1u; a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,83600u); CHECK(!bad_layout);
+    click(&a,170,245,83601u); CHECK(a.motor.stop_mask && !a.motor.manual); /* global STOP on FLOW */
+    click(&a,300,245,83603u); CHECK(!a.ui.flow_page && a.ui.motor_page);
+    CHECK(a.qr.data.valid && a.qr.data.session==session);
+    CHECK(!bad_layout);
+    printf("FLOW concurrent UI: interval max %lu ms, missed %lu, process max %lu us (simulated)\n",
+        (unsigned long)a.flow.data.max_interval_ms,(unsigned long)a.flow.data.missed,(unsigned long)a.flow.data.max_process_us);
+}
+
 int main(int argc,char **argv)
 {
     if(argc>1 && !strcmp(argv[1],"boot")) { test_boot_sequence(); return 0; }
@@ -613,7 +669,7 @@ int main(int argc,char **argv)
         CHECK(!s.data.valid && !s.data.uart_ready && !strcmp(QrService_StateName(&s),"UART ERROR"));
         printf("PASS: QR startup failure (%s)\n",argv[1]); return 0;
     }
-    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui();
+    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui(); test_flow_ui();
 #if MOTOR_TEST_CONFIGURED
     test_configured_actions();
 #endif

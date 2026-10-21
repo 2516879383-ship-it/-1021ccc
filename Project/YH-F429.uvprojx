@@ -891,6 +891,31 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>GYRO</GroupName>
+          <Files>
+            <File>
+              <FileName>icm42688.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gyro\icm42688.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_gyro_bus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gyro\bsp_gyro_bus.c</FilePath>
+            </File>
+            <File>
+              <FileName>gyro_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gyro\gyro_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>gyro_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\gyro\gyro_ui.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>DOC</GroupName>
           <Files>
             <File>

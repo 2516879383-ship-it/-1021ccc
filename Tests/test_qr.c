@@ -4,12 +4,14 @@
 #include "usart/bsp_qr_trigger.h"
 #include "usart/bsp_motor_uart.h"
 #include "motor/motor_test_config.h"
+#include "gyro/gyro_config.h"
 #include "lcd/bsp_lcd.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static unsigned checks;
+void GyroTest_Fail(unsigned value);
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); exit(1); } } while(0)
 static const char sample[] = "156+123+516+231";
 static const char other[] = "123+312+321+123";
@@ -370,7 +372,7 @@ static void test_app_ui(void)
     a.qr.data.accepted_seq=a.qr.data.accepted_ms=a.qr.data.frame_timeouts=UINT32_MAX;
     a.ui.redraw=1u; app_step(&a,20000u);
     CHECK(bad_layout==0u); /* include maximum 32-bit counters and both font sizes */
-    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor,0,21000u);
+    QrApp_Init(&a,t,0u,21000u); QrUi_Process(&a.ui,&a.qr,&a.motor,0,0,21000u);
     CHECK(strstr(lines[1],"UART ERROR")!=0 && !strcmp(lines[2],"--"));
     save_image("qr_uart_error.pgm");
     QrApp_Init(&a,t,1u,22000u); CHECK(!a.qr.data.valid && a.qr.data.session==1u);
@@ -416,7 +418,7 @@ static void test_seven_ui(void)
     a.motor.nodes[4].data.position_counts=-INT64_C(4294967295);
     a.motor.nodes[4].target_counts=INT64_C(4294967295); a.motor.nodes[4].target_known=1u;
     a.motor.nodes[4].data.speed_rpm=INT32_MIN;
-    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,0,UINT32_MAX);
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,0,0,UINT32_MAX);
     CHECK(!bad_layout && strstr(lines[2],"-4294967295")); save_image("motor_detail_stale.pgm");
     a.ui.detail=0; a.ui.redraw=1u;
     for(i=0;i<7u;++i) {
@@ -424,7 +426,7 @@ static void test_seven_ui(void)
         d->valid=7u; d->online=1u; d->speed_rpm=(int32_t)i*10;
         d->status_flags=3u; d->speed_ms=d->status_ms=31000u;
     }
-    QrUi_Process(&a.ui,&a.qr,&a.motor,0,31000u); save_image("motor_seven_online.pgm");
+    QrUi_Process(&a.ui,&a.qr,&a.motor,0,0,31000u); save_image("motor_seven_online.pgm");
     click(&a,20,245,31002u); CHECK(!a.motor.manual && a.motor.stop_mask);
     CHECK(!bad_layout);
 }
@@ -614,14 +616,25 @@ static void test_boot_sequence(void)
         if(now==92000u) { touch_x=420; touch_y=14; touch_down=1u; }
         if(now==92001u || now==92101u) touch_down=0u;
         if(now==92100u) { touch_x=20; touch_y=245; touch_down=1u; }
+        if(now==92200u) { touch_x=340; touch_y=14; touch_down=1u; }
+        if(now==92201u || now==92301u) touch_down=0u;
+        if(now==92300u) { touch_x=20; touch_y=245; touch_down=1u; }
         if(now==95000u) FlowTest_Fail(1u);
         if(now==95500u) FlowTest_Fail(0u);
+        if(now==96500u) GyroTest_Fail(1u);
+        if(now==97000u) GyroTest_Fail(0u);
         app_step(&a,now);
     }
     CHECK(boot_motor.count==12u && a.boot_phase==0u && a.qr.data.valid && a.qr.data.duplicates>90u);
     for(i=0;i<7u;++i) CHECK(a.motor.nodes[i].data.online);
     for(i=0;i<boot_motor.count;++i) CHECK(boot_motor.address[i]<=4u);
     CHECK(a.flow.data.valid && a.flow.data.errors==1u && a.flow.data.segments==2u && a.flow.data.clears==1u);
+    CHECK(a.gyro.data.raw_valid && !a.gyro.data.calibrated && !a.gyro.data.angle_valid);
+    CHECK(a.gyro.data.cal_requests==1u && a.gyro.data.calibration==GYRO_CAL_MOTOR);
+    CHECK(a.gyro.data.errors && a.gyro.data.restarts);
+    printf("GYRO seven-motor/scanner: max sample %lu ms, poll %lu ms, missed %lu, errors %lu, max process %lu us (simulated)\n",
+        (unsigned long)a.gyro.data.max_interval_ms,(unsigned long)a.gyro.data.max_poll_ms,
+        (unsigned long)a.gyro.data.missed,(unsigned long)a.gyro.data.errors,(unsigned long)a.gyro.data.max_process_us);
     printf("FLOW seven-motor/scanner: max interval %lu ms, missed %lu, error %lu, gap %lu, max step %lu us (simulated)\n",
         (unsigned long)a.flow.data.max_interval_ms,(unsigned long)a.flow.data.missed,
         (unsigned long)a.flow.data.errors,(unsigned long)a.flow.data.gaps,(unsigned long)a.flow.data.max_process_us);
@@ -665,15 +678,67 @@ static void test_flow_ui(void)
     d.total_x=INT64_MIN; d.total_y=INT64_MAX;
     d.accepted=d.rejected=d.errors=d.segments=d.gaps=d.missed=UINT32_MAX;
     d.sequence=d.zero_sequence=d.max_process_us=d.max_interval_ms=d.clears=UINT32_MAX;
-    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,83600u);
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,0,83600u);
     CHECK(strstr(lines[3],"-9223372036854775808") && !bad_layout); save_image("flow_limits.pgm");
-    a.ui.flow_detail=1u; a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,83600u); CHECK(!bad_layout);
+    a.ui.flow_detail=1u; a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,&d,0,83600u); CHECK(!bad_layout);
     click(&a,170,245,83601u); CHECK(a.motor.stop_mask && !a.motor.manual); /* global STOP on FLOW */
     click(&a,300,245,83603u); CHECK(!a.ui.flow_page && a.ui.motor_page);
     CHECK(a.qr.data.valid && a.qr.data.session==session);
     CHECK(!bad_layout);
     printf("FLOW concurrent UI: interval max %lu ms, missed %lu, process max %lu us (simulated)\n",
         (unsigned long)a.flow.data.max_interval_ms,(unsigned long)a.flow.data.missed,(unsigned long)a.flow.data.max_process_us);
+}
+
+static void test_gyro_ui(void)
+{
+    QrApp a; MotorTransport t={0,motor_send,motor_busy}; uint32_t now,seq,session;
+    unsigned before=motion_sends,requests,cleared; GyroSnapshot d;
+    QrApp_Init(&a,t,1u,110000u); click(&a,340,14,110000u);
+    CHECK(a.ui.gyro_page && !a.ui.motor_page && strstr(lines[1],"INIT")); save_image("gyro_init.pgm");
+    for(now=110002u;now<111000u;++now) app_step(&a,now);
+    CHECK(a.gyro.data.raw_valid && !a.gyro.data.calibrated && strstr(lines[1],"UNCAL"));
+    CHECK(strstr(lines[2],"--") && strstr(lines[3],"--")); save_image("gyro_uncal.pgm");
+    inject("156+123+516+231\r",111000u,1); app_step(&a,111000u);
+    CHECK(a.qr.data.valid); session=a.qr.data.session; cleared=a.flow.data.clears;
+    click(&a,108,245,111001u); CHECK(!a.gyro.data.zeros); /* ZERO rejected before CAL */
+    touch_x=20; touch_y=245; touch_down=1u;
+    for(now=111003u;now<113500u;++now) app_step(&a,now);
+    printf("GYRO UI cal: req %lu state %u count %lu gap %lu dt %lu raw %u\n",
+        (unsigned long)a.gyro.data.cal_requests,(unsigned)a.gyro.data.calibration,(unsigned long)a.gyro.data.cal_count,
+        (unsigned long)a.gyro.data.gaps,(unsigned long)a.gyro.data.max_interval_ms,a.gyro.data.raw_valid);
+    CHECK(a.gyro.data.cal_requests==1u && a.gyro.data.calibration==GYRO_CAL_DONE);
+    CHECK(a.gyro.data.angle_valid && a.gyro.data.rate_valid && !a.motor.manual);
+    CHECK(motion_sends==before && a.flow.data.clears==cleared && a.qr.data.session==session);
+    save_image("gyro_ready.pgm"); touch_down=0u; app_step(&a,113500u);
+    requests=a.gyro.data.cal_requests; touch_x=108; touch_down=1u;
+    for(now=113501u;now<114000u;++now) app_step(&a,now);
+    CHECK(a.gyro.data.zeros==1u && a.gyro.data.cal_requests==requests && motion_sends==before);
+    touch_down=0u; app_step(&a,114000u);
+    click(&a,420,14,114001u); CHECK(a.ui.gyro_detail); save_image("gyro_diagnostics.pgm");
+    click(&a,300,245,114003u); CHECK(!a.ui.gyro_page && !a.ui.motor_page && !a.ui.flow_page);
+    seq=a.gyro.data.sequence;
+    for(now=114005u;now<114500u;++now) app_step(&a,now);
+    CHECK(a.gyro.data.sequence>seq && a.qr.data.valid); /* background sampling */
+    click(&a,300,245,114500u); CHECK(a.ui.motor_page);
+    click(&a,340,14,114502u); CHECK(a.ui.gyro_page && a.ui.motor_page);
+    click(&a,20,184,114504u); CHECK(motion_sends==before && !a.ui.detail);
+    GyroTest_Fail(1u);
+    for(now=114506u;now<114700u;++now) app_step(&a,now);
+    CHECK(a.gyro.data.state==GYRO_ERROR && !a.gyro.data.angle_valid && a.qr.data.valid);
+    save_image("gyro_error.pgm"); GyroTest_Fail(0u);
+    for(now=114700u;now<115400u;++now) app_step(&a,now);
+    CHECK(a.gyro.data.raw_valid && !a.gyro.data.calibrated && !a.gyro.data.angle_valid);
+    CHECK(motion_sends==before && a.flow.data.clears==cleared && a.qr.data.session==session);
+    /* Max counters and invalid numbers fit the actual font, all rows. */
+    Gyro_GetSnapshot(&a.gyro,115400u,&d);
+    d.sequence=d.interval_ms=d.age_ms=d.max_interval_ms=d.max_poll_ms=d.max_process_us=UINT32_MAX;
+    d.missed=d.gaps=d.errors=d.saturations=d.invalid=d.restarts=d.cal_count=UINT32_MAX;
+    a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,0,&d,115400u);
+    a.ui.gyro_detail=1u; a.ui.redraw=1u; QrUi_Process(&a.ui,&a.qr,&a.motor,0,&d,115400u);
+    CHECK(!bad_layout);
+    click(&a,170,245,115401u); CHECK(a.motor.stop_mask); /* global STOP still available */
+    click(&a,300,245,115403u); CHECK(!a.ui.gyro_page && a.ui.motor_page);
+    CHECK(a.qr.data.valid && a.qr.data.session==session && a.flow.data.clears==cleared);
 }
 
 int main(int argc,char **argv)
@@ -689,7 +754,7 @@ int main(int argc,char **argv)
         CHECK(!s.data.valid && !s.data.uart_ready && !strcmp(QrService_StateName(&s),"UART ERROR"));
         printf("PASS: QR startup failure (%s)\n",argv[1]); return 0;
     }
-    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui(); test_flow_ui();
+    test_validation(); test_stream_sessions(); test_bsp(); test_app_ui(); test_seven_ui(); test_flow_ui(); test_gyro_ui();
 #if MOTOR_TEST_CONFIGURED
     test_configured_actions();
 #endif

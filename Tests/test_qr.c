@@ -496,6 +496,9 @@ static void test_bench_jog(void)
     CHECK(!bad_layout);
 }
 #endif
+void FlowTest_Fail(unsigned value);
+unsigned FlowTest_Bursts(void);
+
 /* Boot-test fixture uses the real QrApp/MotorBus while simulating four motors. */
 static struct {
     uint8_t bytes[128], pending, online, flags[7], reject_enable, drop_velocity;
@@ -603,12 +606,29 @@ static void test_boot_sequence(void)
     boot_fixture(&a,60000u); boot_motor.drop_velocity=1u;
     for(now=60000u;now<73000u;++now) app_step(&a,now);
     CHECK(boot_starts()==1u && a.boot_phase==0u && !boot_motor.rpm[0]);
+    /* Seven online nodes + scanner at 10Hz + touch + sensor disconnect/recovery.
+       Exactly the existing four-wheel boot commands are permitted. */
+    boot_fixture(&a,90000u); boot_motor.online=0x7Fu;
+    for(now=90000u;now<101000u;++now) {
+        if((now-90000u)%100u==0u) inject("156+123+516+231\r",now,1);
+        if(now==92000u) { touch_x=420; touch_y=14; touch_down=1u; }
+        if(now==92001u || now==92101u) touch_down=0u;
+        if(now==92100u) { touch_x=20; touch_y=245; touch_down=1u; }
+        if(now==95000u) FlowTest_Fail(1u);
+        if(now==95500u) FlowTest_Fail(0u);
+        app_step(&a,now);
+    }
+    CHECK(boot_motor.count==12u && a.boot_phase==0u && a.qr.data.valid && a.qr.data.duplicates>90u);
+    for(i=0;i<7u;++i) CHECK(a.motor.nodes[i].data.online);
+    for(i=0;i<boot_motor.count;++i) CHECK(boot_motor.address[i]<=4u);
+    CHECK(a.flow.data.valid && a.flow.data.errors==1u && a.flow.data.segments==2u && a.flow.data.clears==1u);
+    printf("FLOW seven-motor/scanner: max interval %lu ms, missed %lu, error %lu, gap %lu, max step %lu us (simulated)\n",
+        (unsigned long)a.flow.data.max_interval_ms,(unsigned long)a.flow.data.missed,
+        (unsigned long)a.flow.data.errors,(unsigned long)a.flow.data.gaps,(unsigned long)a.flow.data.max_process_us);
     CHECK(!bad_layout);
     printf("PASS: %u boot checks (order, one-shot, missing motor, enable rejection, ACK loss, STOP, QR)\n",checks);
 }
 
-void FlowTest_Fail(unsigned value);
-unsigned FlowTest_Bursts(void);
 static void test_flow_ui(void)
 {
     QrApp a; MotorTransport t={0,motor_send,motor_busy};

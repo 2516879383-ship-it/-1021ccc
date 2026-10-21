@@ -111,6 +111,9 @@ static void test_service(void)
     CHECK(d.sequence==1u && s.data.total_x==x && s.data.total_y==y && f.bursts==n);
     Flow_ResetTotals(&s); CHECK(s.data.total_x==0 && s.data.clears==1u && s.data.zero_sequence==1u);
     deltas(&f,0,0); step(&s,&f,t+=10u); CHECK(s.data.valid && s.data.accepted==2u);
+    /* Shutter is retained as a raw 16-bit field; do not invent a width limit. */
+    f.burst[10]=0xFFu; f.burst[11]=0xFFu; step(&s,&f,t+=10u); CHECK(s.data.valid && s.data.raw.shutter==0xFFFFu);
+    f.burst[10]=1u; f.burst[11]=2u;
     Flow_GetSnapshot(&s,t+101u,&d); CHECK(!d.valid && !d.fresh && !strcmp(Flow_StateName(&d),"STALE"));
     f.burst[6]=0u; deltas(&f,123,-12); step(&s,&f,t+=10u);
     CHECK(!s.data.valid && s.data.error==FLOW_LOW_QUALITY && s.data.total_x==0);
@@ -142,6 +145,12 @@ static void test_faults(void)
 {
     Fake f; FlowService s; FlowSnapshot d; uint32_t t; unsigned i;
     make_fake(&f); f.init_ok=0; Flow_Init(&s,io(&f),0u); CHECK(s.data.state==FLOW_ERROR);
+    CHECK(s.retry_ms==2000u); step(&s,&f,999u); CHECK(f.init_n==1u);
+    step(&s,&f,1000u); CHECK(f.init_n==2u && s.due==3000u);
+    step(&s,&f,1000u); CHECK(f.init_n==2u);
+    step(&s,&f,3000u); CHECK(f.init_n==3u && s.due==7000u);
+    step(&s,&f,7000u); CHECK(f.init_n==4u && s.due==15000u && s.retry_ms==8000u);
+    step(&s,&f,15000u); CHECK(f.init_n==5u && s.due==23000u && s.retry_ms==8000u);
     make_fake(&f); f.id=0u; Flow_Init(&s,io(&f),0u);
     for (i=0;i<60;++i) step(&s,&f,i);
     CHECK(s.data.error==FLOW_ID && !s.data.comm_ok);

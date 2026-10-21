@@ -61,7 +61,7 @@ static void process(FlowService *s,uint32_t now)
     d->error=FLOW_OK;
     if (d->interval_ms>FLOW_STALE_MS) { d->error=FLOW_GAP; ++d->gaps; }
     else if (d->raw.squal<FLOW_MIN_SQUAL) d->error=FLOW_LOW_QUALITY;
-    else if (d->raw.raw_min>d->raw.raw_max || d->raw.shutter>0x1FFFu ||
+    else if (d->raw.raw_min>d->raw.raw_max ||
         (!(d->raw.motion&0x80u) && (d->raw.dx!=0 || d->raw.dy!=0))) d->error=FLOW_STATUS;
     d->tracking=(uint8_t)(d->error==FLOW_OK);
     if (d->tracking && !d->overflow) {

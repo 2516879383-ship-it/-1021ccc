@@ -62,6 +62,22 @@ static void start(GyroService *s,uint32_t now)
     s->data.rate_valid=s->data.angle_valid=s->have_previous=0u;
     /* Preserve a failed calibration result for diagnosis until next CAL. */
     if (s->data.calibration==GYRO_CAL_DONE) s->data.calibration=GYRO_CAL_NONE;
+#if GYRO_TEMP_FIXED_BIAS_ENABLED
+    /*
+     * TEMPORARY bring-up workaround, see gyro_config.h: substitute the measured
+     * stationary offset for a real calibration so RATE/REL stay usable while the
+     * out-of-spec module is pending replacement. It does not claim a CAL result
+     * (the CAL row stays CAL REQUIRED). Real CAL still checks raw samples and
+     * ends in CAL:MOVING for this module; after such a failure use ZERO to
+     * start a new angle segment.
+     */
+    s->data.bias_dps=GYRO_TEMP_FIXED_BIAS_DPS;
+    s->data.calibrated=1u;
+    s->data.calibration=GYRO_CAL_NONE;
+    s->data.angle_deg=0.0;
+    s->data.angle_valid=1u;
+    s->data.angle_gap=0u;
+#endif
     Icm_Begin(&s->chip,now);
     e=s->io.init(s->io.ctx);
     if (e!=GYRO_BUS_OK) { s->chip.bus_error=e; fault(s,ICM_BUS_ERROR,now); }

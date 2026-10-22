@@ -15,9 +15,13 @@
 #define MOTOR_TEST_DIRECTION 0u
 #define MOTOR_TEST_LEASE_MS 1000u
 /* One-shot power-on test: enable 1..4, start 1..4, then stop 1..4.
-   Set to 0 to restore the previous read-only boot. No motion on 5..7. */
+   Set to 0 to restore the previous read-only boot. No motion on 5..7.
+   TEMPORARY 2026-10-22 gyro bench bring-up: set to 0u here so a bench without
+   motor feedback does not latch a never-confirmed wheel STOP (STOP UNCONF) and
+   block gyro CAL. Restore to 1u before any vehicle test that expects the
+   four-wheel power-on sequence. */
 #ifndef MOTOR_BOOT_SEQUENCE_ENABLED
-#define MOTOR_BOOT_SEQUENCE_ENABLED 1u
+#define MOTOR_BOOT_SEQUENCE_ENABLED 0u
 #endif
 #define MOTOR_BOOT_RPM 10u
 #define MOTOR_BOOT_STEP_MS 1000u

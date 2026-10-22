@@ -3,6 +3,11 @@
 #include <string.h>
 #include <limits.h>
 static float absf(float x) { return x<0.0f ? -x : x; }
+static GyroCalibration motor_rejection(uint8_t condition)
+{
+    return condition == GYRO_MOTOR_STOP ? GYRO_CAL_STOP :
+        condition == GYRO_MOTOR_UNKNOWN ? GYRO_CAL_UNKNOWN : GYRO_CAL_MOTOR;
+}
 static void gap(GyroService *s,GyroError e)
 {
     if (!s->data.angle_gap) ++s->data.gaps;
@@ -57,7 +62,7 @@ int Gyro_RequestCalibration(GyroService *s,uint32_t now,uint8_t motor_active)
 {
     if (s->data.calibration==GYRO_CAL_RUNNING) return 0;
     ++s->data.cal_requests;
-    if (motor_active) { s->data.calibration=GYRO_CAL_MOTOR; return 0; }
+    if (motor_active) { s->data.calibration=motor_rejection(motor_active); return 0; }
     if (!fresh(s,now)) { s->data.calibration=GYRO_CAL_NOT_READY; return 0; }
     s->data.angle_valid=0u; s->have_previous=0u;
     s->data.calibration=GYRO_CAL_RUNNING; s->data.rate_valid=0u;
@@ -116,7 +121,7 @@ static void process(GyroService *s,uint32_t now,uint8_t motor_active)
         return;
     }
     if (d->calibration==GYRO_CAL_RUNNING) {
-        if (motor_active) cal_fail(s,GYRO_CAL_MOTOR);
+        if (motor_active) cal_fail(s,motor_rejection(motor_active));
         else if ((uint32_t)(now-s->cal_start)>=GYRO_CAL_TIMEOUT_MS) cal_fail(s,GYRO_CAL_TIMEOUT);
     }
     if ((uint32_t)(now-(d->have_sample ? d->sample_ms : s->ready_ms))>GYRO_STALE_MS) {
@@ -203,6 +208,6 @@ const char *Gyro_ErrorName(GyroError e)
 const char *Gyro_CalName(GyroCalibration c)
 {
     static const char *names[]={"CAL REQUIRED","KEEP STILL","OK","MOVING","TIMEOUT",
-        "ERROR","MOTOR ACTIVE","SAMPLE GAP","NOT READY"};
+        "ERROR","MOTOR ACTIVE","SAMPLE GAP","NOT READY","MOTOR UNKNOWN","STOP UNCONF"};
     return (unsigned)c<sizeof(names)/sizeof(names[0]) ? names[c] : "UNKNOWN";
 }

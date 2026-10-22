@@ -221,7 +221,8 @@ static void groups_stops(void)
     /* A fresh fault on one wheel stops all wheels and does not disable the lift. */
     init(&s); MotorBus_SetManual(&s.bus,1,s.now);
     CHECK(MotorBus_Wheels(&s.bus,rpm,100,5000,s.now)); run(&s,200); s.flags[2]|=8u; run(&s,1800);
-    for(i=1;i<=4;++i) CHECK(s.sends[i][EMM_STOP]==1u);
+    for(i=1;i<=4;++i) CHECK(s.sends[i][EMM_STOP]>=1u && s.sends[i][EMM_STOP]<=5u);
+    CHECK(s.bus.nodes[2].action==MOTOR_STOP_PENDING && s.bus.nodes[2].stop_unconfirmed);
     CHECK(!s.sends[6][EMM_ENABLE]);
     /* A 10 Hz wheel producer shares the bus with measured feedback. */
     init(&s); MotorBus_SetManual(&s.bus,1,s.now);
@@ -370,7 +371,7 @@ static void unknown_recovery(void)
     init(&s); m=speed(3u,0u); CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,200u);
     s.online &= 0xFBu; run(&s,4200u);
     CHECK(s.bus.nodes[2].action==MOTOR_UNKNOWN);
-    s.online |= 4u; s.flags[2]=3u; s.rpm[2]=10; s.arrive[2]=0u;
+    s.online |= 4u; s.refuse_stop=1u; s.flags[2]=3u; s.rpm[2]=10; s.arrive[2]=0u;
     run(&s,3200u);
     CHECK(s.bus.nodes[2].action==MOTOR_UNKNOWN);
     m=speed(3u,0u); CHECK(!MotorBus_Submit(&s.bus,&m,s.now));
@@ -379,8 +380,42 @@ static void unknown_recovery(void)
 }
 #endif
 
-int main(void)
+static void stop_review(void)
 {
+    Sim s; MotorAction m; unsigned i, before[7], lost_attempts; uint32_t requested, deadline;
+    init(&s); MotorBus_SetManual(&s.bus,1u,s.now); m=speed(1u,0u);
+    CHECK(MotorBus_Submit(&s.bus,&m,s.now)); run(&s,200u);
+    s.refuse_stop=1u; s.drop_code=EMM_STOP; MotorBus_Stop(&s.bus,1u,s.now);
+    requested=s.now;
+    for(i=0;i<500u && !s.sends[1][EMM_STOP];++i) run(&s,1u);
+    run(&s,10u); s.refuse_stop=0u; s.drop_code=0u; run(&s,2500u);
+    CHECK(s.sends[1][EMM_STOP]>=2u && !s.rpm[0] && s.bus.nodes[0].action==MOTOR_STOPPED);
+    CHECK(s.now-requested<3000u);
+    lost_attempts=s.sends[1][EMM_STOP];
+    /* ACK loss alone: feedback confirms, so retries eventually cease. */
+    init(&s); s.drop_code=EMM_STOP; MotorBus_Stop(&s.bus,0x20u,s.now); run(&s,1800u);
+    CHECK(s.bus.nodes[5].action==MOTOR_STOPPED && !s.sends[6][EMM_ENABLE]);
+    before[0]=s.sends[6][EMM_STOP]; run(&s,2500u); CHECK(s.sends[6][EMM_STOP]==before[0]);
+    /* Permanent disconnect, repeated user STOP, and a recovered link. */
+    init(&s); s.online=0x40u; MotorBus_Stop(&s.bus,MOTOR_ALL,s.now);
+    deadline=s.bus.nodes[0].deadline_ms;
+    for(i=0;i<120u;++i) { MotorBus_Stop(&s.bus,MOTOR_ALL,s.now); run(&s,100u); }
+    CHECK(s.bus.nodes[0].deadline_ms==deadline && s.bus.nodes[0].action==MOTOR_UNKNOWN);
+    for(i=0;i<6u;++i) {
+        before[i]=s.sends[i+1u][EMM_STOP];
+        CHECK(before[i]>=3u && before[i]<=16u); /* 3 fast, then <=1/s */
+    }
+    CHECK(s.bus.nodes[6].poll_samples[0]>5u && s.bus.nodes[6].poll_samples[2]>5u);
+    m=speed(1u,0u); CHECK(!MotorBus_Submit(&s.bus,&m,s.now));
+    s.online=MOTOR_ALL; run(&s,6000u);
+    for(i=0;i<7u;++i) CHECK(s.bus.nodes[i].action==MOTOR_STOPPED);
+    CHECK(!s.sends[6][EMM_ENABLE] && !s.sends[1][EMM_MOVE]);
+    printf("PASS: stop review lost-command retry=%u, offline first axis=%u, live polls=%lu\n",
+        lost_attempts,before[0],(unsigned long)s.bus.nodes[6].poll_samples[0]);
+}
+int main(int argc,char **argv)
+{
+    if(argc>1 && !strcmp(argv[1],"review")) { stop_review(); return 0; }
     protocol(); polling(); groups_stops(); positions(); synchronous(); transport(); isolation_wrap();
 #if !MOTOR_DRIVER_REQUIRE_MANUAL
     programmatic_control();

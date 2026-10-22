@@ -9,27 +9,9 @@
 static const uint16_t row_y[9] = {8u, 32u, 60u, 92u, 114u, 136u, 158u, 180u, 202u};
 static void line(QrUi *u, unsigned i, const char *text)
 {
-    char title[28];
-    if (!u->redraw && strcmp(u->previous[i], text) == 0) return;
-    LCD_SetTextColor(LCD_COLOR_BLACK);
-    LCD_FillRect(8u, row_y[i], i == 0u ? 296u : 464u, i == 2u ? 26u : 18u);
-    LCD_SetFont(i == 2u && !u->motor_page && !u->flow_page && !u->gyro_page ? &Font24 : &Font16);
-    LCD_SetTextColor(LCD_COLOR_WHITE);
-    if (i==0u) { strncpy(title,text,27u); title[27]='\0'; }
-    LCD_DisplayStringAt(8u, row_y[i], (uint8_t *)(i==0u ? title : text), LEFT_MODE);
-    strncpy(u->previous[i], text, 42u); u->previous[i][42] = '\0';
-}
-static void buttons(uint8_t motor, uint8_t manual, uint8_t flow, uint8_t gyro)
-{
-    LCD_SetFont(&Font16); LCD_SetTextColor(LCD_COLOR_WHITE);
-    LCD_FillRect(8u, 232u, 144u, 32u); LCD_FillRect(160u, 232u, 80u, 32u);
-    LCD_FillRect(248u, 232u, 224u, 32u);
-    LCD_SetTextColor(LCD_COLOR_BLACK); LCD_SetBackColor(LCD_COLOR_WHITE);
-    LCD_DisplayStringAt(20u, 240u, (uint8_t *)(gyro ? "CAL" : (flow ? "CLEAR" : (motor ? (manual ? "READ ONLY" : "MANUAL") : "RESCAN"))), LEFT_MODE);
-    if (gyro) LCD_DisplayStringAt(92u,240u,(uint8_t *)"ZERO",LEFT_MODE);
-    LCD_DisplayStringAt(168u, 240u, (uint8_t *)"STOP", LEFT_MODE);
-    LCD_DisplayStringAt(260u, 240u, (uint8_t *)((flow || gyro) ? "BACK" : (motor ? "QR" : "MOTOR")), LEFT_MODE);
-    LCD_SetBackColor(LCD_COLOR_BLACK);
+    /* 296 title pixels / Font16.Width(11) = 26 complete characters. */
+    unsigned limit = i ? 42u : 26u;
+    strncpy(u->target[i], text, limit); u->target[i][limit] = '\0';
 }
 void QrUi_Init(QrUi *u)
 { memset(u, 0, sizeof(*u)); u->redraw = 1u; }
@@ -56,7 +38,8 @@ QrUiAction QrUi_Touch(QrUi *u, int32_t x, int32_t y, uint8_t down)
             u->redraw = 1u;
         }
         else if (x >= 160 && x < 240) return QR_UI_STOP_ALL;
-        else if (x < 152) { u->redraw = 1u; return u->gyro_page ? (x<88 ? QR_UI_GYRO_CAL : QR_UI_GYRO_ZERO) :
+        else if (x < 152) { if (u->motor_page && !u->flow_page && !u->gyro_page) u->redraw = 1u;
+            return u->gyro_page ? (x<88 ? QR_UI_GYRO_CAL : QR_UI_GYRO_ZERO) :
             (u->flow_page ? QR_UI_FLOW_CLEAR : (u->motor_page ? QR_UI_MODE : QR_UI_RESCAN)); }
     } else if (u->motor_page && !u->flow_page && !u->gyro_page) {
         if (!u->detail) {
@@ -91,7 +74,7 @@ static void qr_page(QrUi *u, const QrService *s, uint32_t now)
 {
     char t[43];
     const QrSnapshot *d = &s->data;
-    line(u, 0u, "XM1605 - UART config unverified");
+    line(u, 0u, "XM1605 UART UNVERIFIED");
     snprintf(t, sizeof(t), "S%lu %s", (unsigned long)d->session, QrService_StateName(s)); line(u, 1u, t);
     line(u, 2u, d->valid ? d->current.text : "--");
     if (d->valid) snprintf(t, sizeof(t), "ACCEPT:%lu AT:%lums", (unsigned long)d->accepted_seq,
@@ -120,7 +103,7 @@ static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
     const MotorNode *n = &b->nodes[u->selected];
     const MotorSnapshot *d = &n->data;
     unsigned i;
-    line(u, 0u, b->manual ? "MOTOR MANUAL - STOP ALWAYS AVAILABLE" : "MOTOR READ ONLY - DEMO DISABLED");
+    line(u, 0u, b->manual ? "MOTOR MANUAL / STOP READY" : "MOTOR READ ONLY");
     if (!u->detail) {
         for (i = 0u; i < MOTOR_COUNT; ++i) {
             n = &b->nodes[i]; d = &n->data;
@@ -129,14 +112,14 @@ static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
             if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, now)) snprintf(target, sizeof(target), "%02X", d->status_flags);
             else strcpy(target, "--");
             snprintf(t, sizeof(t), "%u %-4s %-5s RPM:%s S:%s", (unsigned)d->address, MotorBus_Role(d->address),
-                d->online ? (MotorBus_Fresh(n, MOTOR_VALID_SPEED, now) && MotorBus_Fresh(n, MOTOR_VALID_STATUS, now) ? "ON" : "STALE") :
+                n->stop_unconfirmed ? "STOP?" : d->online ? (MotorBus_Fresh(n, MOTOR_VALID_SPEED, now) && MotorBus_Fresh(n, MOTOR_VALID_STATUS, now) ? "ON" : "STALE") :
                 d->rx_count ? "OFF" : "WAIT", value, target);
             line(u, i + 1u, t);
         }
         snprintf(t, sizeof(t), "%.42s", b->message); line(u, 8u, t); return;
     }
     snprintf(t, sizeof(t), "%u %s %s %s", (unsigned)d->address, MotorBus_Role(d->address),
-        d->online ? "ON" : "OFF/WAIT", MotorBus_ActionName(n->action)); line(u, 1u, t);
+        d->online ? "ON" : "OFF/WAIT", n->stop_unconfirmed ? "STOP UNCONF" : MotorBus_ActionName(n->action)); line(u, 1u, t);
     if (d->valid & MOTOR_VALID_POSITION) counts(value, sizeof(value), d->position_counts); else strcpy(value, "--");
     if (n->target_known) counts(target, sizeof(target), n->target_counts); else strcpy(target, "--");
     snprintf(t, sizeof(t), "P:%s T:%s%s", value, target,
@@ -155,30 +138,99 @@ static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
     line(u, 7u, b->manual ? "RUN ONCE                  STOP AXIS" : "MANUAL REQUIRED           STOP AXIS");
     line(u, 8u, "STOP WHEELS               BACK");
 }
+/* Each step emits one <=480x4 rectangle or <=2 glyphs. A HAL/LCD timeout
+   may exceed this target; the gyro still detects and invalidates that gap.
+   No service is called here: all modules resume in the common app loop. */
+enum { DRAW_IDLE, DRAW_CLEAR, DRAW_ROWS, DRAW_TEXT, DRAW_BUTTONS, DRAW_LABELS };
+enum { JOB_MOTOR=1, JOB_FLOW=2, JOB_GYRO=4, JOB_DETAIL=8, JOB_MANUAL=16 };
+static void text_step(QrUi *u, uint16_t x, uint16_t y, const char *text, sFONT *font)
+{
+    char part[3]; unsigned n=0u;
+    while (n<2u && text[u->offset+n]) { part[n]=text[u->offset+n]; ++n; }
+    part[n]='\0';
+    LCD_SetFont(font);
+    LCD_DisplayStringAt((uint16_t)(x+u->offset*font->Width),y,(uint8_t *)part,LEFT_MODE);
+    u->offset=(uint8_t)(u->offset+n);
+}
+static void draw_step(QrUi *u)
+{
+    static const uint16_t bx[5]={160u,8u,248u,312u,400u};
+    static const uint16_t by[5]={232u,232u,232u,4u,4u};
+    static const uint16_t bw[5]={80u,144u,224u,80u,72u};
+    static const uint16_t lx[6]={168u,20u,92u,260u,318u,406u};
+    const char *label;
+    uint8_t f=u->job_flags;
+    if (u->drawing==DRAW_CLEAR) {
+        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_SetTextColor(LCD_COLOR_BLACK);
+        LCD_FillRect(0u,u->clear_y,480u,4u); u->clear_y+=4u;
+        if (u->clear_y>=272u) { u->button=u->strip=0u; u->drawing=DRAW_BUTTONS; }
+    } else if (u->drawing==DRAW_ROWS) {
+        while (u->row<9u && !strcmp(u->previous[u->row],u->target[u->row])) ++u->row;
+        if (u->row==9u) { u->drawing=DRAW_IDLE; return; }
+        {
+            unsigned height=u->row==2u ? 26u : 18u;
+            unsigned h=height-u->strip; if (h>4u) h=4u;
+            LCD_SetBackColor(LCD_COLOR_BLACK); LCD_SetTextColor(LCD_COLOR_BLACK);
+            LCD_FillRect(8u,(uint16_t)(row_y[u->row]+u->strip),u->row ? 464u : 296u,(uint16_t)h);
+            u->strip=(uint8_t)(u->strip+h);
+            if (u->strip==height) { u->offset=0u; u->drawing=DRAW_TEXT; }
+        }
+    } else if (u->drawing==DRAW_TEXT) {
+        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_SetTextColor(LCD_COLOR_WHITE);
+        if (u->target[u->row][u->offset]) text_step(u,8u,row_y[u->row],u->target[u->row],
+            u->row==2u && !(f & (JOB_MOTOR|JOB_FLOW|JOB_GYRO)) ? &Font24 : &Font16);
+        if (!u->target[u->row][u->offset]) {
+            strcpy(u->previous[u->row],u->target[u->row]); ++u->row;
+            u->strip=0u; u->drawing=DRAW_ROWS;
+        }
+    } else if (u->drawing==DRAW_BUTTONS) {
+        LCD_SetTextColor(LCD_COLOR_WHITE);
+        LCD_FillRect(bx[u->button],(uint16_t)(by[u->button]+u->strip),bw[u->button],4u);
+        u->strip+=4u;
+        if (u->strip==(u->button<3u ? 32u : 24u)) {
+            u->strip=0u;
+            if (++u->button==5u) { u->button=u->offset=0u; u->drawing=DRAW_LABELS; }
+        }
+    } else if (u->drawing==DRAW_LABELS) {
+        switch (u->button) {
+        case 0u: label="STOP"; break;
+        case 1u: label=(f & JOB_GYRO) ? "CAL" : (f & JOB_FLOW) ? "CLEAR" :
+            (f & JOB_MOTOR) ? ((f & JOB_MANUAL) ? "READ ONLY" : "MANUAL") : "RESCAN"; break;
+        case 2u: label=(f & JOB_GYRO) ? "ZERO" : ""; break;
+        case 3u: label=(f & (JOB_FLOW|JOB_GYRO)) ? "BACK" : (f & JOB_MOTOR) ? "QR" : "MOTOR"; break;
+        case 4u: label="GYRO"; break;
+        default: label=(f & (JOB_FLOW|JOB_GYRO)) ? ((f & JOB_DETAIL) ? "DATA" : "MORE") : "FLOW"; break;
+        }
+        LCD_SetBackColor(LCD_COLOR_WHITE); LCD_SetTextColor(LCD_COLOR_BLACK);
+        if (label[u->offset]) text_step(u,lx[u->button],u->button<4u ? 240u : 10u,label,&Font16);
+        LCD_SetBackColor(LCD_COLOR_BLACK);
+        if (!label[u->offset]) {
+            u->offset=0u;
+            if (++u->button==6u) { u->row=u->strip=0u; u->drawing=DRAW_ROWS; }
+        }
+    }
+}
 void QrUi_Process(QrUi *u, const QrService *s, const MotorBus *motor, const FlowSnapshot *flow,
                   const GyroSnapshot *gyro, uint32_t now)
 {
-    if (!u->redraw && (uint32_t)(now - u->last_draw) < 100u) return;
-    u->last_draw = now;
-    if (u->redraw) {
-        LCD_SetBackColor(LCD_COLOR_BLACK); LCD_Clear(LCD_COLOR_BLACK); buttons(u->motor_page, motor->manual, u->flow_page, u->gyro_page);
+    if (u->redraw || (!u->drawing && (uint32_t)(now-u->last_draw)>=100u)) {
+        /* Page/layout changes cancel the old job. Ordinary refreshes freeze one
+           snapshot, finish it at loop speed, then take the next >=100ms request. */
+        if (u->redraw) {
+            memset(u->previous,0,sizeof(u->previous)); u->clear_y=0u; u->drawing=DRAW_CLEAR;
+        } else { u->row=u->strip=0u; u->drawing=DRAW_ROWS; }
+        u->redraw=0u; u->last_draw=now;
+        u->job_flags=(uint8_t)((u->motor_page ? JOB_MOTOR : 0u) | (u->flow_page ? JOB_FLOW : 0u) |
+            (u->gyro_page ? JOB_GYRO : 0u) | (motor->manual ? JOB_MANUAL : 0u) |
+            ((u->gyro_page ? u->gyro_detail : u->flow_detail) ? JOB_DETAIL : 0u));
+        if (u->gyro_page || u->flow_page) {
+            unsigned i; char t[43];
+            for (i=0u;i<9u;++i) {
+                if (u->gyro_page) GyroUi_Line(t,i,u->gyro_detail,gyro);
+                else FlowUi_Line(t,i,u->flow_detail,flow);
+                line(u,i,t);
+            }
+        } else if (u->motor_page) motor_page(u,motor,now); else qr_page(u,s,now);
     }
-    if (u->gyro_page) {
-        unsigned i; char t[43];
-        for (i=0u;i<9u;++i) { GyroUi_Line(t,i,u->gyro_detail,gyro); line(u,i,t); }
-    } else if (u->flow_page) {
-        unsigned i; char t[43];
-        for (i = 0u; i < 9u; ++i) { FlowUi_Line(t, i, u->flow_detail, flow); line(u, i, t); }
-    } else if (u->motor_page) motor_page(u, motor, now); else qr_page(u, s, now);
-    if (u->redraw) {
-        LCD_SetFont(&Font16); LCD_SetTextColor(LCD_COLOR_WHITE);
-        LCD_FillRect(312u,4u,80u,24u);
-        LCD_FillRect(400u, 4u, 72u, 24u);
-        LCD_SetTextColor(LCD_COLOR_BLACK); LCD_SetBackColor(LCD_COLOR_WHITE);
-        LCD_DisplayStringAt(318u,10u,(uint8_t *)"GYRO",LEFT_MODE);
-        LCD_DisplayStringAt(406u, 10u, (uint8_t *)(u->gyro_page ? (u->gyro_detail ? "DATA" : "MORE") :
-            (u->flow_page ? (u->flow_detail ? "DATA" : "MORE") : "FLOW")), LEFT_MODE);
-        LCD_SetBackColor(LCD_COLOR_BLACK);
-    }
-    u->redraw = 0u;
+    draw_step(u);
 }

@@ -38,7 +38,7 @@ static int healthy(const MotorBus *b, uint8_t mask, uint32_t now, uint8_t enable
         const MotorNode *n = &b->nodes[i];
         if (!n->data.online || !MotorBus_Fresh(n, MOTOR_VALID_STATUS, now) ||
             (n->data.status_flags & 0x0Cu) || (enabled && !(n->data.status_flags & 1u)) ||
-            n->action == MOTOR_STOP_PENDING || n->action == MOTOR_UNKNOWN) return 0;
+            n->stop_unconfirmed || n->action == MOTOR_STOP_PENDING || n->action == MOTOR_UNKNOWN) return 0;
     }
     return 1;
 }
@@ -208,6 +208,11 @@ void MotorBus_Stop(MotorBus *b, uint8_t mask, uint32_t now)
         b->sync_state == MOTOR_SYNC_VERIFY) {
         mask |= b->sync_mask; sync_fail(b); interrupted_sync = 1u;
     }
+    /* Merge repeated UI/internal requests without resetting evidence, deadline
+       or the rate limiter, and without aborting a verification query. */
+    for (i = 0u; i < MOTOR_COUNT; ++i)
+        if (b->nodes[i].stop_unconfirmed) mask &= (uint8_t)~(1u << i);
+    if (!mask) return;
     for (i = 0u; i < b->queue_count; ++i) {
         if (b->queue[i].mask & mask) state(b, b->queue[i].mask, MOTOR_CANCELLED, b->queue[i].id, now);
         else b->queue[write++] = b->queue[i];
@@ -224,6 +229,7 @@ void MotorBus_Stop(MotorBus *b, uint8_t mask, uint32_t now)
     for (i = 0u; i < MOTOR_COUNT; ++i) if (mask & (1u << i)) {
         MotorNode *n = &b->nodes[i];
         n->motion = 0u; n->previous_known = 0u; n->stop_sent = 0u;
+        n->stop_unconfirmed = 1u; n->stop_attempts = 0u; n->stop_retry_ms = now;
         n->action = MOTOR_STOP_PENDING; n->action_ms = now;
         n->deadline_ms = now + MOTOR_STOP_TIMEOUT_MS;
         n->stop_speed_seq = n->data.speed_seq; n->stop_status_seq = n->data.status_seq;
@@ -258,7 +264,8 @@ static void failed(MotorBus *b, uint8_t result)
         MotorNode *n = &b->nodes[r.address - 1u];
         n->data.command_code = r.code; n->data.command_result = result; ++n->data.command_seq;
         n->data.last_error = result == EMM_ACK_TIMEOUT ? MOTOR_ERROR_TIMEOUT : MOTOR_ERROR_REJECTED;
-        n->action = MOTOR_STOP_PENDING; return;
+        if (n->stop_unconfirmed && !due(b->now_ms, n->deadline_ms)) n->action = MOTOR_STOP_PENDING;
+        return;
     }
     for (i = 0u; i < MOTOR_COUNT; ++i) if (r.mask & (1u << i)) {
         MotorNode *n = &b->nodes[i];
@@ -370,14 +377,18 @@ static void monitor(MotorBus *b)
         uint32_t age = b->now_ms - n->data.last_rx_ms;
         if (n->data.rx_count && age > n->max_age_ms) n->max_age_ms = age;
         if (age > MOTOR_BUS_FRESH_MS) n->data.online = 0u;
-        if (n->action == MOTOR_STOP_PENDING && n->stop_sent &&
+        if (n->stop_unconfirmed && n->stop_sent &&
             n->data.speed_seq != n->stop_speed_seq && n->data.status_seq != n->stop_status_seq &&
+            due(n->data.speed_ms, n->stop_first_ms + 1u) && due(n->data.status_ms, n->stop_first_ms + 1u) &&
             MotorBus_Fresh(n, MOTOR_VALID_SPEED, b->now_ms) &&
             MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) && n->data.speed_rpm == 0 &&
-            !(n->data.status_flags & 0x0Cu)) n->action = MOTOR_STOPPED;
-        else if (n->action == MOTOR_STOP_PENDING && due(b->now_ms, n->deadline_ms)) {
+            !(n->data.status_flags & 0x0Cu)) {
+            n->stop_unconfirmed = 0u; b->stop_mask &= (uint8_t)~(1u << i);
+            n->action = n->action == MOTOR_UNKNOWN && !(n->data.status_flags & 1u) ? MOTOR_IDLE : MOTOR_STOPPED;
+        } else if (n->stop_unconfirmed && n->action != MOTOR_UNKNOWN && due(b->now_ms, n->deadline_ms)) {
             n->action = MOTOR_UNKNOWN; n->action_ms = b->now_ms;
         }
+        if (n->stop_unconfirmed) continue; /* UNKNOWN recovery cannot erase STOP intent. */
         if (n->data.command_code == EMM_ENABLE && n->action == MOTOR_ACCEPTED) {
             if (MotorBus_Fresh(n, MOTOR_VALID_STATUS, b->now_ms) &&
                 due(n->data.status_ms, n->action_ms + 1u) &&
@@ -449,10 +460,25 @@ static int choose(MotorBus *b)
     unsigned i, scan;
     memset(&r, 0, sizeof(r));
     if (b->stop_mask) {
-        for (i = 0u; i < MOTOR_COUNT; ++i) if (b->stop_mask & (1u << i)) break;
+        for (scan = 0u; scan < MOTOR_COUNT; ++scan) {
+            i = b->stop_cursor; b->stop_cursor = (uint8_t)((i + 1u) % MOTOR_COUNT);
+            if (b->stop_mask & (1u << i)) break;
+        }
         r.address = (uint8_t)(i + 1u); r.mask = bit(r.address); r.code = EMM_STOP; r.kind = STOP;
         r.id = new_id(b); r.action.command = Emm_Stop(r.address); activate(b, r); return 1;
     }
+    /* One retry at most before yielding a transaction slot to feedback/other
+       polls. Rotate axes; never restart the stop's evidence baseline. */
+    if (!b->retry_yield) for (scan = 0u; scan < MOTOR_COUNT; ++scan) {
+        MotorNode *n;
+        i = b->stop_cursor; b->stop_cursor = (uint8_t)((i + 1u) % MOTOR_COUNT); n = &b->nodes[i];
+        if (!n->stop_unconfirmed || !n->stop_sent || !due(b->now_ms, n->stop_retry_ms) ||
+            !due(b->now_ms, n->quiet_until)) continue;
+        r.address = n->data.address; r.mask = bit(r.address); r.code = EMM_STOP; r.kind = STOP;
+        r.id = new_id(b); r.action.command = Emm_Stop(r.address); b->retry_yield = 1u;
+        activate(b, r); return 1;
+    }
+    b->retry_yield = 0u;
     if (b->sync_state == MOTOR_SYNC_PREPARE || b->sync_state == MOTOR_SYNC_TRIGGER) {
         if (due(b->now_ms, b->sync_deadline) || !healthy(b, b->sync_mask, b->now_ms, 1u)) {
             MotorBus_Stop(b, b->sync_mask, b->now_ms); sync_fail(b); return 0;
@@ -486,11 +512,13 @@ static int choose(MotorBus *b)
         activate(b, r); return 1;
     }
     /* Stop verification runs before background polling, even for a full stop group. */
-    for (i = 0u; i < MOTOR_COUNT; ++i) {
-        MotorNode *n = &b->nodes[i];
-        unsigned j;
-        if (n->action != MOTOR_STOP_PENDING || !n->stop_sent || !due(b->now_ms, n->quiet_until)) continue;
-        for (j = 0u; j < 3u; j += 2u) if (due(b->now_ms, n->poll_due[j])) {
+    for (scan = 0u; scan < MOTOR_COUNT * 2u; ++scan) {
+        uint8_t k = b->verify_cursor;
+        MotorNode *n = &b->nodes[k / 2u];
+        unsigned j = (k % 2u) * 2u;
+        b->verify_cursor = (uint8_t)((k + 1u) % (MOTOR_COUNT * 2u));
+        if (!n->stop_unconfirmed || !n->stop_sent || !due(b->now_ms, n->quiet_until)) continue;
+        if (due(b->now_ms, n->poll_due[j])) {
             r.address = n->data.address; r.mask = bit(r.address); r.code = codes[j]; r.kind = QUERY;
             r.action.command = Emm_Query(r.address, r.code); activate(b, r); return 1;
         }
@@ -535,6 +563,7 @@ void MotorBus_Process(MotorBus *b, uint32_t now)
     if (!b->pending && !choose(b)) return;
     if (b->sent) return;
     r = &b->active;
+    if (r->kind == STOP && !b->nodes[r->address - 1u].stop_unconfirmed) { b->pending = 0u; return; }
     if ((r->kind == CONTROL || r->kind == GROUP) && due(now, r->expires_ms)) {
         state(b, r->mask, MOTOR_CANCELLED, r->id, now); b->pending = 0u;
         b->message = "REQUEST EXPIRED / NOT SENT"; return;
@@ -551,9 +580,16 @@ void MotorBus_Process(MotorBus *b, uint32_t now)
         ++b->nodes[r->address - 1u].data.tx_count;
         if (r->kind == STOP) {
             MotorNode *n = &b->nodes[r->address - 1u];
-            b->stop_mask &= (uint8_t)~r->mask; n->stop_sent = 1u; n->action_ms = now;
-            n->stop_speed_seq = n->data.speed_seq; n->stop_status_seq = n->data.status_seq;
-            n->poll_due[0] = n->poll_due[2] = now;
+            b->stop_mask &= (uint8_t)~r->mask;
+            if (!n->stop_sent) {
+                n->stop_first_ms = now;
+                n->stop_speed_seq = n->data.speed_seq; n->stop_status_seq = n->data.status_seq;
+                n->poll_due[0] = n->poll_due[2] = now;
+            }
+            n->stop_sent = 1u;
+            if (n->stop_attempts < 255u) ++n->stop_attempts;
+            n->stop_retry_ms = now + (n->stop_attempts < MOTOR_STOP_FAST_ATTEMPTS ?
+                MOTOR_STOP_RETRY_MS : MOTOR_STOP_BACKOFF_MS);
         } else if (r->kind == GROUP) {
             b->next_wheel_ms = now + 100u;
             for (i = 0u; i < 4u; ++i) {

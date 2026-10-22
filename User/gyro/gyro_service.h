@@ -6,7 +6,8 @@ typedef enum { GYRO_OK, GYRO_BUS, GYRO_ID, GYRO_RESET, GYRO_CONFIG,
     GYRO_BAD_SAMPLE, GYRO_SATURATED, GYRO_GAP, GYRO_STALE } GyroError;
 typedef enum { GYRO_CAL_NONE, GYRO_CAL_RUNNING, GYRO_CAL_DONE,
     GYRO_CAL_MOVING, GYRO_CAL_TIMEOUT, GYRO_CAL_ERROR, GYRO_CAL_MOTOR,
-    GYRO_CAL_GAP, GYRO_CAL_NOT_READY } GyroCalibration;
+    GYRO_CAL_GAP, GYRO_CAL_NOT_READY, GYRO_CAL_UNKNOWN, GYRO_CAL_STOP } GyroCalibration;
+enum { GYRO_MOTOR_NONE, GYRO_MOTOR_ACTIVE, GYRO_MOTOR_UNKNOWN, GYRO_MOTOR_STOP };
 typedef struct {
     GyroState state; GyroError error, last_fault; GyroBusError bus_error;
     GyroCalibration calibration;
@@ -28,7 +29,7 @@ typedef struct {
 void Gyro_Init(GyroService *s, GyroIo io, uint32_t now);
 void Gyro_Process(GyroService *s, uint32_t now, uint8_t motor_active);
 void Gyro_GetSnapshot(const GyroService *s, uint32_t now, GyroSnapshot *out);
-/* motor_active is an auxiliary rejection signal, never proof of rest. */
+/* GYRO_MOTOR_* is auxiliary rejection evidence, never proof of rest. */
 int Gyro_RequestCalibration(GyroService *s, uint32_t now, uint8_t motor_active);
 int Gyro_ZeroAngle(GyroService *s, uint32_t now);
 const char *Gyro_StateName(const GyroSnapshot *d);

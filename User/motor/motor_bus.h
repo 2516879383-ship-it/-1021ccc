@@ -27,11 +27,13 @@ typedef struct {
     MotorActionState action;
     uint32_t request_id, action_ms, deadline_ms, poll_due[3], quiet_until;
     uint32_t stop_speed_seq, stop_status_seq, max_age_ms, max_poll_gap_ms[3];
+    uint32_t stop_retry_ms, stop_first_ms;
     uint32_t poll_last_ms[3], poll_samples[3];
     uint32_t rejected_commands;
     int64_t target_counts, previous_target;
     int32_t target_rpm;
     uint8_t target_known, previous_known, motion, failures, stop_sent, requested_enable;
+    uint8_t stop_unconfirmed, stop_attempts;
     uint16_t firmware, hardware;
     uint8_t version_valid, last_notice, failure_code, failure_result;
 } MotorNode;
@@ -50,6 +52,7 @@ typedef struct {
     uint8_t queue_count, wheels_pending, pending, sent, tx_wait;
     uint8_t stop_mask, poll_cursor, sync_count, sync_index, sync_mask, sync_locked;
     uint8_t group_ack, manual, diagnostic_mask;
+    uint8_t stop_cursor, verify_cursor, retry_yield;
     uint32_t now_ms, next_id, next_send_ms, tx_ms, tx_limit_ms, reply_ms;
     uint32_t sync_id, sync_deadline, group_id, next_wheel_ms;
     uint32_t tx_frames, tx_bytes, rx_frames, rx_bytes, ignored_frames, timeout_count, transport_errors;

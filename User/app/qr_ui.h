@@ -9,7 +9,10 @@ typedef enum { QR_UI_NONE, QR_UI_RESCAN, QR_UI_MODE, QR_UI_RUN,
                QR_UI_GYRO_CAL, QR_UI_GYRO_ZERO } QrUiAction;
 typedef struct {
     char previous[9][43];
-    uint32_t last_draw;
+    char target[9][43]; /* one coherent refresh snapshot, frozen until painted */
+    uint32_t last_draw, max_step_ms;
+    uint16_t clear_y;
+    uint8_t drawing, row, offset, strip, button, job_flags;
     uint8_t flow_page, flow_detail;
     uint8_t gyro_page, gyro_detail;
     uint8_t motor_page, was_down, redraw, selected, detail, test_action;

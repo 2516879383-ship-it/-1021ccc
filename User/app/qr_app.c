@@ -155,19 +155,28 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
     a->boot_due = now; a->boot_deadline = now + 10000u;
     if (a->boot_phase != BOOT_DONE) a->motor.message = "BOOT 1-4 WAIT FEEDBACK";
 }
-static uint8_t motor_active(const QrApp *a)
+static uint8_t motor_active(const QrApp *a, uint32_t now)
 {
     unsigned i;
+    uint8_t condition = GYRO_MOTOR_NONE;
     if (a->boot_phase!=BOOT_DONE || a->motor.queue_count || a->motor.wheels_pending ||
         a->motor.sync_state==MOTOR_SYNC_PREPARE || a->motor.sync_state==MOTOR_SYNC_TRIGGER ||
-        a->motor.sync_state==MOTOR_SYNC_VERIFY) return 1u;
+        a->motor.sync_state==MOTOR_SYNC_VERIFY) condition = GYRO_MOTOR_ACTIVE;
     for (i=0u;i<MOTOR_COUNT;++i) {
         const MotorNode *n=&a->motor.nodes[i];
+        if (n->stop_unconfirmed || n->action==MOTOR_STOP_PENDING) return GYRO_MOTOR_STOP;
+        if (!(MOTOR_CAL_AXIS_MASK & (1u << i))) continue;
         if (n->motion || n->action==MOTOR_QUEUED || n->action==MOTOR_SENT ||
-            n->action==MOTOR_ACCEPTED || n->action==MOTOR_EXECUTING || n->action==MOTOR_STOP_PENDING ||
-            ((n->data.valid&MOTOR_VALID_SPEED) && n->data.speed_rpm!=0)) return 1u;
+            n->action==MOTOR_ACCEPTED || n->action==MOTOR_EXECUTING ||
+            (MotorBus_Fresh(n,MOTOR_VALID_SPEED,now) && n->data.speed_rpm!=0)) {
+            if (condition != GYRO_MOTOR_UNKNOWN) condition = GYRO_MOTOR_ACTIVE;
+        } else if (n->action==MOTOR_UNKNOWN ||
+            ((n->data.rx_count || n->data.valid || n->request_id || n->stop_sent) &&
+             (!n->data.online || !MotorBus_Fresh(n,MOTOR_VALID_SPEED,now) ||
+              !MotorBus_Fresh(n,MOTOR_VALID_STATUS,now) || (n->data.status_flags & 0x0Cu))))
+            condition = GYRO_MOTOR_UNKNOWN;
     }
-    return 0u;
+    return condition;
 }
 void QrApp_Process(QrApp *a, uint32_t now)
 {
@@ -179,7 +188,7 @@ void QrApp_Process(QrApp *a, uint32_t now)
     BspMotorUart_PumpBus(&a->motor, now);
     MotorBus_Process(&a->motor, now);
     boot_process(a, now);
-    Gyro_Process(&a->gyro, AppClock_Now(), motor_active(a));
+    now = AppClock_Now(); Gyro_Process(&a->gyro, now, motor_active(a, now));
     AppTouch_Process(now); AppTouch_GetState(&x, &y, &down);
     now = AppClock_Now();
     action = QrUi_Touch(&a->ui, x, y, down);
@@ -187,9 +196,9 @@ void QrApp_Process(QrApp *a, uint32_t now)
         BspQrUart_BeginSession(&a->qr, now);
     else if (action == QR_UI_FLOW_CLEAR) Flow_ResetTotals(&a->flow);
     else if (action == QR_UI_GYRO_CAL) {
-        (void)Gyro_RequestCalibration(&a->gyro, now, motor_active(a)); a->ui.redraw=1u;
+        (void)Gyro_RequestCalibration(&a->gyro, now, motor_active(a, now));
     } else if (action == QR_UI_GYRO_ZERO) {
-        (void)Gyro_ZeroAngle(&a->gyro, now); a->ui.redraw=1u;
+        (void)Gyro_ZeroAngle(&a->gyro, now);
     } else if (action==QR_UI_MODE || action==QR_UI_RUN || action==QR_UI_STOP_AXIS ||
         action==QR_UI_STOP_WHEELS || action==QR_UI_STOP_ALL) manual_action(a, action, now);
     BspQrTrigger_Poll(now);
@@ -198,10 +207,11 @@ void QrApp_Process(QrApp *a, uint32_t now)
     QrService_Process(&a->qr, now);
     Flow_Process(&a->flow, now);
     now = AppClock_Now();
-    Gyro_Process(&a->gyro, now, motor_active(a));
+    Gyro_Process(&a->gyro, now, motor_active(a, now));
     now = AppClock_Now();
     Flow_GetSnapshot(&a->flow, now, &flow);
     Gyro_GetSnapshot(&a->gyro, now, &gyro);
     QrUi_Process(&a->ui, &a->qr, &a->motor, &flow, &gyro, now);
-    Gyro_Process(&a->gyro, AppClock_Now(), motor_active(a));
+    if (AppClock_Now() - now > a->ui.max_step_ms) a->ui.max_step_ms = AppClock_Now() - now;
+    now = AppClock_Now(); Gyro_Process(&a->gyro, now, motor_active(a, now));
 }

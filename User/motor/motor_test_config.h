@@ -29,6 +29,14 @@
 #define MOTOR_SYNC_CLEAN_BOOT_CONFIRMED 0u
 #define MOTOR_POSITION_TOLERANCE_COUNTS 128u
 #define MOTOR_STOP_TIMEOUT_MS 3000u
+/* Bring-up bus budget, not a mechanical stopping-time guarantee. Initial
+   submission plus two fast retries, then persistent low-rate verification. */
+#define MOTOR_STOP_RETRY_MS 200u
+#define MOTOR_STOP_FAST_ATTEMPTS 3u
+#define MOTOR_STOP_BACKOFF_MS 1000u
+/* CAL bench scope: all discovered/commanded axes remain relevant. Never-seen,
+   never-commanded nodes may be absent; STOP intent cannot be excluded. */
+#define MOTOR_CAL_AXIS_MASK 0x7Fu
 
 /* Gate relaxations (2026-10-21). Each macro can be overridden from the build to
    restore the old strict behaviour; anything not overridden uses the relaxed

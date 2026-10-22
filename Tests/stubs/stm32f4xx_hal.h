@@ -5,8 +5,8 @@
 typedef struct SPI_HandleTypeDef SPI_HandleTypeDef;
 
 typedef enum { HAL_OK, HAL_ERROR, HAL_BUSY, HAL_TIMEOUT } HAL_StatusTypeDef;
-typedef struct { uint32_t SR; } USART_TypeDef;
-typedef struct { uint32_t count; } DMA_Stream_TypeDef;
+typedef struct { uint32_t SR, CR1, CR3; } USART_TypeDef;
+typedef struct { uint32_t count, CR; } DMA_Stream_TypeDef;
 typedef struct { unsigned unused; } GPIO_TypeDef;
 extern USART_TypeDef fake_usart1, fake_usart3, fake_uart5;
 extern DMA_Stream_TypeDef fake_stream1;
@@ -28,7 +28,7 @@ typedef struct {
 } DMA_InitTypeDef;
 typedef struct { DMA_Stream_TypeDef *Instance; DMA_InitTypeDef Init; unsigned State; void *Parent; } DMA_HandleTypeDef;
 typedef struct { uint32_t BaudRate, WordLength, StopBits, Parity, Mode, HwFlowCtl, OverSampling; } UART_InitTypeDef;
-typedef struct { USART_TypeDef *Instance; UART_InitTypeDef Init; DMA_HandleTypeDef *hdmarx, *hdmatx; uint32_t gState; } UART_HandleTypeDef;
+typedef struct { USART_TypeDef *Instance; UART_InitTypeDef Init; DMA_HandleTypeDef *hdmarx, *hdmatx; uint32_t gState, RxState, ErrorCode; } UART_HandleTypeDef;
 typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define HAL_DMA_STATE_READY 1u
 #define HAL_DMA_STATE_BUSY 2u
@@ -38,7 +38,13 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define DMA_NORMAL 0u
 #define DMA_PRIORITY_HIGH 2u
 #define HAL_UART_STATE_READY 0u
+#define HAL_UART_STATE_RESET 32u
 #define HAL_UART_STATE_BUSY_TX 1u
+#define HAL_UART_STATE_BUSY_RX 2u
+#define HAL_UART_ERROR_NONE 0u
+#define DMA_SxCR_EN 1u
+#define USART_CR3_DMAR 64u
+#define USART_CR3_DMAT 128u
 #define DMA_PINC_DISABLE 0u
 #define DMA_MINC_ENABLE 1u
 #define DMA_PDATAALIGN_BYTE 0u
@@ -71,6 +77,8 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define UART_FLAG_NE 4u
 #define UART_FLAG_ORE 8u
 #define UART_FLAG_IDLE 16u
+#define UART_FLAG_TC 256u
+#define UART_IT_TC 256u
 #define UART_IT_IDLE 16u
 #define UART_IT_ERR 32u
 #define UART_IT_PE 64u
@@ -87,12 +95,12 @@ typedef struct { uint32_t Pin, Mode, Pull, Speed, Alternate; } GPIO_InitTypeDef;
 #define __HAL_RCC_DMA1_CLK_ENABLE() ((void)0)
 #define __HAL_DMA_GET_COUNTER(d) ((d)->Instance->count)
 #define __HAL_LINKDMA(u,field,d) do { (u)->field = &(d); (d).Parent = (u); } while (0)
-#define __HAL_UART_CLEAR_OREFLAG(u) ((u)->Instance->SR = 0u)
-#define __HAL_UART_CLEAR_IDLEFLAG(u) ((u)->Instance->SR = 0u)
-#define __HAL_UART_ENABLE_IT(u,it) ((void)(u),(void)(it))
-#define __HAL_UART_DISABLE_IT(u,it) ((void)(u),(void)(it))
+#define __HAL_UART_CLEAR_OREFLAG(u) ((u)->Instance->SR &= ~(UART_FLAG_PE|UART_FLAG_FE|UART_FLAG_NE|UART_FLAG_ORE|UART_FLAG_IDLE))
+#define __HAL_UART_CLEAR_IDLEFLAG(u) __HAL_UART_CLEAR_OREFLAG(u)
+#define __HAL_UART_ENABLE_IT(u,it) ((it)==UART_IT_ERR ? ((u)->Instance->CR3|=(it)) : ((u)->Instance->CR1|=(it)))
+#define __HAL_UART_DISABLE_IT(u,it) ((it)==UART_IT_ERR ? ((u)->Instance->CR3&=~(it)) : ((u)->Instance->CR1&=~(it)))
 #define __HAL_UART_GET_FLAG(u,f) ((u)->Instance->SR & (f))
-#define __HAL_UART_GET_IT_SOURCE(u,it) ((void)(u),(void)(it),1u)
+#define __HAL_UART_GET_IT_SOURCE(u,it) ((it)==UART_IT_ERR ? ((u)->Instance->CR3&(it)) : ((u)->Instance->CR1&(it)))
 #define __DMB() ((void)0)
 uint32_t __get_PRIMASK(void);
 void __disable_irq(void);

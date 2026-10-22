@@ -1,4 +1,5 @@
 #include "flow/bsp_flow_spi.h"
+#include "flow/flow_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +33,7 @@ HAL_StatusTypeDef HAL_SPI_Init(SPI_HandleTypeDef *h)
 }
 HAL_StatusTypeDef HAL_SPI_TransmitReceive(SPI_HandleTypeDef *h,uint8_t *tx,uint8_t *rx,uint16_t size,uint32_t timeout)
 {
-    CHECK(h->Instance==SPI2 && timeout==1u && size<=12u && cs==GPIO_PIN_RESET); ++exchanges;
+    CHECK(h->Instance==SPI2 && timeout==FLOW_SPI_TIMEOUT_MS && size<=12u && cs==GPIO_PIN_RESET); ++exchanges;
     memset(rx,0x49,size); (void)tx; return spi_fail ? HAL_TIMEOUT : HAL_OK;
 }
 int main(void)

@@ -24,5 +24,9 @@
 #if (FLOW_X_SIGN != 1 && FLOW_X_SIGN != -1) || (FLOW_Y_SIGN != 1 && FLOW_Y_SIGN != -1)
 #error Flow axis signs must be +1 or -1
 #endif
-#define FLOW_SPI_TIMEOUT_MS 1u
+/* HAL SPI timeout is quantized by the 1 ms SysTick (HAL aborts when the tick
+   count changes during a call). A 1 ms timeout can abort a correct ~0.15 ms
+   transfer that straddles a tick edge; 2 ms cannot false-timeout any transfer
+   shorter than 1 ms, while a genuinely stuck bus is still bounded. */
+#define FLOW_SPI_TIMEOUT_MS 2u
 #endif

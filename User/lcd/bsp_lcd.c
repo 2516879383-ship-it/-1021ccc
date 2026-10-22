@@ -282,6 +282,10 @@ static void LCD_GPIO_Config(void)
   
 }
 
+/*
+ * 板级显示启动入口：配置 LCD GPIO、SDRAM 帧缓冲及 LTDC 时序；
+ * 主程序启动阶段完成初始化，图层地址和透明度随后由 main 配置。
+ */
 void LCD_Init(void)
 {
     RCC_PeriphCLKInitTypeDef  periph_clk_init_struct;  
@@ -597,6 +601,10 @@ uint32_t LCD_ReadPixel(uint16_t Xpos, uint16_t Ypos)
   * @param  Color: 背景颜色
   * @retval None
   */
+/*
+ * 整层填色入口，会同步等待 DMA2D 操作；工作量随整屏像素数增长。
+ * 统一应用运行时由 qr_ui.c 分条带清除，避免一次整屏调用占住传感器调度。
+ */
 void LCD_Clear(uint32_t Color)
 { 
   /* 清屏 */ 
@@ -641,6 +649,10 @@ void LCD_DisplayChar(uint16_t Xpos, uint16_t Ypos, uint8_t Ascii)
   * @param  Mode: 显示对齐方式，可以是CENTER_MODE、RIGHT_MODE、LEFT_MODE
   * @retval None
   */
+/*
+ * 按当前字体、颜色和对齐方式逐字绘制字符串；字数越多，CPU 绘制耗时越长。
+ * 统一界面把长字符串拆为每步最多两个字符，分步进度由上层保存。
+ */
 void LCD_DisplayStringAt(uint16_t Xpos, uint16_t Ypos, uint8_t *Text, Text_AlignModeTypdef Mode)
 {
   uint16_t ref_column = 1, i = 0;
@@ -1077,6 +1089,10 @@ void LCD_DrawBitmap(uint32_t Xpos, uint32_t Ypos, uint8_t *pbmp)
   * @param  Height: 矩形高度
   * @retval 无
   */
+/*
+ * 使用当前颜色同步填充指定矩形，底层经 LL_FillBuffer/DMA2D 完成。
+ * 该函数不调度业务服务，运行期调用者需控制每次矩形大小与返回间隔。
+ */
 void LCD_FillRect(uint16_t Xpos, uint16_t Ypos, uint16_t Width, uint16_t Height)
 {
   uint32_t  x_address = 0;

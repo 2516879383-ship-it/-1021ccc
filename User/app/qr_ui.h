@@ -1,5 +1,9 @@
-#ifndef QR_UI_H
+﻿#ifndef QR_UI_H
 #define QR_UI_H
+/*
+ * 界面作业状态：target 是本次冻结的九行文本，previous 是已完成显示的内容；
+ * drawing/row/offset/strip 记录跨主循环的绘图进度，redraw 用于取消旧作业并切换布局。
+ */
 #include "./qr/qr_service.h"
 #include "./motor/motor_bus.h"
 #include "./flow/flow_service.h"

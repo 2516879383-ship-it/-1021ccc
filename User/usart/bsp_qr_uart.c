@@ -1,3 +1,7 @@
+﻿/*
+ * 扫码 USART3 适配：PB10/PB11，循环 DMA 接收→带捕获时间戳的软件队列→前台扫码服务。
+ * 保留捕获时刻而非出队时刻，保证分帧超时和新会话边界不被主循环积压掩盖。
+ */
 #include "bsp_qr_uart.h"
 
 #define DMA_SIZE 256u
@@ -20,6 +24,10 @@ void BspQrUart_Error(void)
     if (!restart_rx) ++uart_errors;
     restart_rx = 1u;
 }
+/*
+ * IRQ 中搬运新增 DMA 数据，同时记录捕获时间；UART 错误时不交付，
+ * 队列溢出后标记整段损坏，待前台清理并通知解析器重新同步。
+ */
 void BspQrUart_RxEvent(void)
 {
     uint16_t head, next;
@@ -39,6 +47,9 @@ void BspQrUart_RxEvent(void)
         dma_at = (uint16_t)((dma_at + 1u) & (DMA_SIZE - 1u));
     }
 }
+/*
+ * 配置 USART3 和 DMA1 Stream1 接收；二者同抢占级，电机 UART5 使用更高优先级。
+ */
 void BspQrUart_MspInit(UART_HandleTypeDef *uart)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -58,6 +69,9 @@ void BspQrUart_MspInit(UART_HandleTypeDef *uart)
     HAL_NVIC_SetPriority(USART3_IRQn, 2u, 0u); HAL_NVIC_EnableIRQ(USART3_IRQn);
     HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 2u, 0u); HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
 }
+/*
+ * 重置接收游标并启动循环 DMA，额外检查 DMA 状态以识别旧 HAL 的假成功。
+ */
 static uint8_t start_rx(void)
 {
     HAL_StatusTypeDef result;
@@ -69,6 +83,9 @@ static uint8_t start_rx(void)
     __HAL_UART_ENABLE_IT(&qr_uart, UART_IT_IDLE);
     return 1u;
 }
+/*
+ * 按 qr_config.h 配置扫码 UART，尝试启动 DMA 并向应用报告当前接收可用性。
+ */
 uint8_t BspQrUart_Init(void)
 {
     qr_uart.Instance = USART3; qr_uart.Init.BaudRate = QR_UART_BAUDRATE;
@@ -80,6 +97,10 @@ uint8_t BspQrUart_Init(void)
     if (!configured || !receiving) BspQrUart_Error();
     return receiving;
 }
+/*
+ * 前台中止并重建本扫码通道；失败至少间隔 100 ms 重试，
+ * 过程不关闭 SysTick 和电机中断，避免扫码恢复挤占其它模块的中断服务。
+ */
 static void recover(uint32_t now)
 {
     if (!configured || (retry_wait && (uint32_t)(now - retry_started) < 100u)) return;
@@ -96,6 +117,10 @@ static void recover(uint32_t now)
     HAL_NVIC_ClearPendingIRQ(USART3_IRQn); HAL_NVIC_ClearPendingIRQ(DMA1_Stream1_IRQn);
     HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn); HAL_NVIC_EnableIRQ(USART3_IRQn);
 }
+/*
+ * 先在临界区丢弃已经进入 DMA/队列的旧字节，再开启服务新会话。
+ * 不重启正常 DMA；解析器另等行尾或静默边界，避免把旧行后缀当新码。
+ */
 void BspQrUart_BeginSession(QrService *s, uint32_t now)
 {
     uint32_t mask = __get_PRIMASK();
@@ -105,6 +130,10 @@ void BspQrUart_BeginSession(QrService *s, uint32_t now)
     __set_PRIMASK(mask);
     QrService_BeginSession(s, now);
 }
+/*
+ * 前台按预算消费字节及捕获时间；先处理错误/溢出事件、清掉积压并损坏半帧，
+ * 再交给 QrService，最后发布原始流量统计。
+ */
 void BspQrUart_Pump(QrService *s, uint32_t now)
 {
     uint8_t b;
@@ -130,6 +159,10 @@ void BspQrUart_Pump(QrService *s, uint32_t now)
     }
     s->data.raw_bytes = raw_bytes; s->data.last_byte_ms = last_byte_ms;
 }
+/*
+ * 先检查接收错误，再清 IDLE；错误只登记并关闭相应 RX 中断，
+ * 把 DMA 恢复留给主循环，正常路径交 HAL 后搬运 IDLE 数据。
+ */
 void USART3_IRQHandler(void)
 {
     /* Inspect errors before clearing IDLE: the SR/DR read also clears UART errors. */

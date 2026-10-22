@@ -1,4 +1,4 @@
-/* PMW3901 Arduino driver
+﻿/* PMW3901 Arduino driver
  * Copyright (c) 2017 Bitcraze AB
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -23,6 +23,10 @@
 /* Optimisation table adapted from Bitcraze Arduino, commit
    d322d98d6f61757352d11d922cd194539e165231. See THIRD_PARTY_NOTICES.md.
    All waits are foreground deadlines; one table entry per call. */
+/*
+ * PMW3901 寄存器驱动：保持上游优化表和许可声明，提供 SPI 事务、运动突发解码及分步启动。
+ * 毫秒等待存为下次调用期限，微秒级片选时序由可超时的适配接口完成。
+ */
 #include "pmw3901.h"
 #include <string.h>
 static const struct { uint8_t reg, value; uint16_t wait_ms; } setup[] = {
@@ -102,6 +106,10 @@ static const struct { uint8_t reg, value; uint16_t wait_ms; } setup[] = {
 {0x40, 0x80, 0},
 };
 static int reached(uint32_t now, uint32_t at) { return (int32_t)(now - at) >= 0; }
+/*
+ * 封装一次寄存器读写，满足地址/数据/片选保持时序；
+ * 即使中途失败也执行片选释放路径，防止占住 SPI 器件。
+ */
 static int transaction(const FlowIo *io, uint8_t address, uint8_t *data, size_t n, int write)
 {
     uint8_t unused, zeros[12] = {0};
@@ -124,6 +132,9 @@ int Pmw_Read(const FlowIo *io, uint8_t reg, uint8_t *data, size_t size)
 }
 int Pmw_Write(const FlowIo *io, uint8_t reg, uint8_t value)
 { return transaction(io, (uint8_t)(reg | 0x80u), &value, 1u, 1); }
+/*
+ * 读取产品号、反码和版本；产品/反码都匹配后才认定器件身份有效。
+ */
 int Pmw_CheckId(Pmw3901 *p, const FlowIo *io)
 {
     if (!Pmw_Read(io, 0x00u, &p->product, 1u) ||
@@ -136,6 +147,10 @@ static int16_t signed_word(uint8_t lo, uint8_t hi)
     uint16_t v = (uint16_t)((uint16_t)hi * 256u + lo);
     return (int16_t)(v < 32768u ? (int32_t)v : (int32_t)v - 65536);
 }
+/*
+ * 解码 12 字节运动突发：dx/dy 为小端有符号数，shutter 高字节在前，
+ * 同时保留质量、运动标志和原始亮度供服务层判断跟踪有效性。
+ */
 void Pmw_Decode(const uint8_t b[12], PmwMotion *m)
 {
     m->motion=b[0]; m->observation=b[1];
@@ -144,6 +159,9 @@ void Pmw_Decode(const uint8_t b[12], PmwMotion *m)
     /* Burst shutter is upper byte first, unlike little-endian deltas. */
     m->shutter=(uint16_t)((uint16_t)b[10]*256u+b[11]);
 }
+/*
+ * 读取一致的运动突发，拒绝全 00/全 FF 总线异常响应；质量门控由光流服务继续判断。
+ */
 int Pmw_Burst(const FlowIo *io, PmwMotion *m)
 {
     uint8_t b[12]; unsigned i; uint8_t any=0u, all=0xFFu;
@@ -154,6 +172,10 @@ int Pmw_Burst(const FlowIo *io, PmwMotion *m)
 }
 void Pmw_Begin(Pmw3901 *p, uint32_t now)
 { memset(p,0,sizeof(*p)); p->due=now+40u; }
+/*
+ * 上电/恢复初始化状态机：复位、识别、清启动数据、逐项写优化表、等待并复核。
+ * 就绪前消费一次不确定的启动位移而不发布，避免把重启期间运动计入新采样段。
+ */
 int Pmw_Step(Pmw3901 *p, const FlowIo *io, uint32_t now)
 {
     uint8_t discard; int result; PmwMotion m;

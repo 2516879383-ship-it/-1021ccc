@@ -1,3 +1,9 @@
+﻿/*
+ * 七电机共享串口调度层：地址 1/2/3/4 对应前左/前右/后左/后右，
+ * 5=旋转臂、6=升降、7=前后微调；同一时刻只保留一个可匹配的线上事务。
+ * 发送提交、ACK 接受、反馈执行/到位、停车确认分别建模；普通运动不因超时自动重放。
+ * STOP 意图持续保留并限频重试，只有首次提交之后的新鲜速度和状态才能确认停车。
+ */
 #include "motor_bus.h"
 #include "motor_test_config.h"
 #include <string.h>
@@ -14,6 +20,9 @@ static int mask_ready(const MotorBus *b, uint8_t mask, uint32_t now)
         if ((mask & (1u << i)) && !due(now, b->nodes[i].quiet_until)) return 0;
     return 1;
 }
+/*
+ * 检查指定单个反馈字段是否有效且未过期；online 或 valid 位本身不等于当前新鲜。
+ */
 int MotorBus_Fresh(const MotorNode *n, uint8_t field, uint32_t now)
 {
     uint32_t at = field == MOTOR_VALID_POSITION ? n->data.position_ms :
@@ -31,6 +40,9 @@ const char *MotorBus_ActionName(MotorActionState s)
         "COMPLETE", "REJECTED", "UNKNOWN", "CANCELLED", "STOP UNCONF", "STOPPED"};
     return (unsigned)s < sizeof(names) / sizeof(names[0]) ? names[s] : "?";
 }
+/*
+ * 检查掩码内轴的在线/状态新鲜度、故障、使能要求及停止/未知状态，供运动入口复用。
+ */
 static int healthy(const MotorBus *b, uint8_t mask, uint32_t now, uint8_t enabled)
 {
     unsigned i;
@@ -55,6 +67,10 @@ static void sync_fail(MotorBus *b)
     b->sync_locked = 1u; b->sync_state = MOTOR_SYNC_LOCKED;
     b->message = "SYNC CACHE UNKNOWN / LOCKED";
 }
+/*
+ * 清空调度器，绑定传输接口并分散七轴的三类轮询期限；
+ * 同步缓存是否可信只由明确的启动配置决定，主控复位不能自动证明驱动缓存干净。
+ */
 void MotorBus_Init(MotorBus *b, MotorTransport t, uint32_t now)
 {
     unsigned i, j;
@@ -70,6 +86,9 @@ void MotorBus_Init(MotorBus *b, MotorTransport t, uint32_t now)
         for (j = 0u; j < 3u; ++j) b->nodes[i].poll_due[j] = now + (i * 3u + j) * 24u;
     }
 }
+/*
+ * 验证速度/位置帧、转速、模式及租约/超时范围，阻止无效参数进入调度队列。
+ */
 static int action_ok(const MotorAction *a)
 {
     const EmmCommand *c;
@@ -86,6 +105,10 @@ static int action_ok(const MotorAction *a)
         a->pulses_per_rev <= 1000000u && a->timeout_ms >= 100u && a->timeout_ms <= 60000u;
     return 0;
 }
+/*
+ * 把协议中的脉冲目标换算为反馈计数，建立后续到位判断的可观测目标。
+ * 相对前目标必须有已知历史，相对当前位置必须有新鲜位置；超出反馈表示范围则拒绝。
+ */
 static int set_target(MotorNode *n, const MotorAction *a, uint32_t now)
 {
     const uint8_t *c = a->command.bytes;
@@ -107,6 +130,9 @@ static int set_target(MotorNode *n, const MotorAction *a, uint32_t now)
     if (n->target_counts < -INT64_C(4294967295) || n->target_counts > INT64_C(4294967295)) return 0;
     n->target_known = 1u; return 1;
 }
+/*
+ * 检查队列容量、同步占用和轴冲突，分配请求编号及发送前有效期；成功仅代表已排队。
+ */
 static int enqueue(MotorBus *b, MotorRequest r, uint32_t now)
 {
     unsigned i;
@@ -128,6 +154,9 @@ static int enqueue(MotorBus *b, MotorRequest r, uint32_t now)
     b->queue[b->queue_count++] = r;
     state(b, r.mask, MOTOR_QUEUED, r.id, now); b->message = "QUEUED"; return 1;
 }
+/*
+ * 对单轴提交使能/失能请求；先要求健康状态，随后通过新的状态反馈确认结果。
+ */
 int MotorBus_Enable(MotorBus *b, uint8_t a, uint8_t enabled, uint32_t now)
 {
     MotorRequest r;
@@ -138,6 +167,10 @@ int MotorBus_Enable(MotorBus *b, uint8_t a, uint8_t enabled, uint32_t now)
     r.address = a; r.code = EMM_ENABLE; r.mask = bit(a); r.kind = CONTROL;
     return enqueue(b, r, now);
 }
+/*
+ * 提交单轴非同步速度或位置动作；需参数合法、轴空闲且有新鲜健康使能反馈。
+ * 返回成功表示入队，执行/完成状态由后续 Process 和反馈更新。
+ */
 int MotorBus_Submit(MotorBus *b, const MotorAction *a, uint32_t now)
 {
     MotorRequest r;
@@ -150,6 +183,10 @@ int MotorBus_Submit(MotorBus *b, const MotorAction *a, uint32_t now)
     r.address = addr; r.code = a->command.code; r.mask = bit(addr); r.kind = CONTROL;
     return enqueue(b, r, now);
 }
+/*
+ * 接收按前左、前右、后左、后右排列的四轮有符号 RPM，生成 0xAA 多机帧。
+ * 保留最新待发速度向量，替换待发向量不会延长已运行向量的租约；不是底盘运动学解算。
+ */
 int MotorBus_Wheels(MotorBus *b, const int32_t rpm[4], uint8_t acc, uint32_t lease, uint32_t now)
 {
     MotorRequest r;
@@ -172,6 +209,10 @@ int MotorBus_Wheels(MotorBus *b, const int32_t rpm[4], uint8_t acc, uint32_t lea
     /* A new pending vector does not extend the already running vector's lease. */
     b->message = "WHEELS QUEUED"; return 1;
 }
+/*
+ * 开启“逐轴写同步缓存→统一触发→反馈验证”的事务。
+ * 要求缓存可信且总线无冲突；准备或触发出现不确定性后锁定同步流程，避免误用残留缓存。
+ */
 int MotorBus_Sync(MotorBus *b, const MotorAction *a, uint8_t count, uint32_t now)
 {
     unsigned i;
@@ -198,6 +239,11 @@ int MotorBus_Sync(MotorBus *b, const MotorAction *a, uint8_t count, uint32_t now
     b->sync_state = MOTOR_SYNC_PREPARE;
     state(b, mask, MOTOR_QUEUED, b->sync_id, now); b->message = "SYNC PREPARE"; return 1;
 }
+/*
+ * 登记掩码内轴的持久停止意图，取消相关待发动作，并优先安排非同步单播 STOP。
+ * 重复请求合并，不重置首次期限/反馈基线/限频；motion 清零表示软件取消，
+ * 实物停车仍待 stop_unconfirmed 清除。正在发送的 DMA 帧保持完整，升降轴不以失能代替 STOP。
+ */
 void MotorBus_Stop(MotorBus *b, uint8_t mask, uint32_t now)
 {
     unsigned i, write = 0u;
@@ -236,6 +282,10 @@ void MotorBus_Stop(MotorBus *b, uint8_t mask, uint32_t now)
     }
     if (!interrupted_sync) b->message = "STOP REQUESTED / VERIFY";
 }
+/*
+ * 切换界面显式操作模式；退出手动请求全轴 STOP。
+ * 程序调用是否也必须手动模式由 MOTOR_DRIVER_REQUIRE_MANUAL 决定。
+ */
 void MotorBus_SetManual(MotorBus *b, uint8_t manual, uint32_t now)
 {
     if (b->manual && !manual) MotorBus_Stop(b, MOTOR_ALL, now);
@@ -244,6 +294,10 @@ void MotorBus_SetManual(MotorBus *b, uint8_t manual, uint32_t now)
 }
 void MotorBus_ReadVersions(MotorBus *b) { b->diagnostic_mask = MOTOR_ALL; }
 
+/*
+ * 按事务种类收敛超时/拒绝：查询退避并更新在线状态，STOP 保留停止意图，
+ * 普通控制失败取消运动并请求停止；同步失败额外锁定缓存，不重放原运动。
+ */
 static void failed(MotorBus *b, uint8_t result)
 {
     MotorRequest r = b->active;
@@ -284,6 +338,9 @@ static void failed(MotorBus *b, uint8_t result)
         result == 0xE2u ? "E2 CONDITION/PARAM REJECTED" : result == 0xEEu ? "EE FORMAT REJECTED" :
         result == EMM_ACK_TIMEOUT ? "ACK TIMEOUT / STOP VERIFY" : "TRANSPORT ERROR / STOP VERIFY";
 }
+/*
+ * 命令提交到传输层后建立运动监视期限与目标检查状态；这一步不证明电机已经转动。
+ */
 static void begin_motion(MotorBus *b, MotorNode *n, const MotorAction *a)
 {
     uint8_t was_moving = n->motion;
@@ -292,6 +349,10 @@ static void begin_motion(MotorBus *b, MotorNode *n, const MotorAction *a)
     n->data.command_code = a->command.code;
     if (!was_moving) n->poll_due[0] = n->poll_due[1] = n->poll_due[2] = b->now_ms;
 }
+/*
+ * 解析器的前台回调：只接纳与当前已发事务地址/功能码一致的应答。
+ * 查询更新字段时间戳与序号；ACK 只推进命令接受状态，停车/到位依赖独立反馈验证。
+ */
 static void received(void *context, const EmmFrame *f)
 {
     MotorBus *b = (MotorBus *)context;
@@ -346,8 +407,15 @@ static void received(void *context, const EmmFrame *f)
         if (r.code == EMM_MOVE) { n->previous_target = n->target_counts; n->previous_known = n->target_known; }
     }
 }
+/*
+ * 由串口 Pump 在前台喂入字节流；协议解析及业务状态更新不在串口中断中执行。
+ */
 void MotorBus_Receive(MotorBus *b, const uint8_t *bytes, size_t count, uint32_t now)
 { b->now_ms = now; b->rx_bytes += (uint32_t)count; EmmParser_Feed(&b->parser, bytes, count, received, b); }
+/*
+ * 处理传输故障边界：丢弃协议半帧、待发普通动作和旧反馈有效性，
+ * 对已运动轴保留/请求停止，同步缓存转锁定；链路恢复后不会自动重放位置或速度动作。
+ */
 void MotorBus_TransportError(MotorBus *b, MotorError error, uint32_t now)
 {
     unsigned i;
@@ -368,6 +436,11 @@ void MotorBus_TransportError(MotorBus *b, MotorError error, uint32_t now)
     b->parser.used = 0u; b->next_send_ms = now + MOTOR_BUS_QUIET_MS;
     b->message = "BUS ERROR / NO REPLAY";
 }
+/*
+ * 用新鲜反馈监视七轴：确认停止、使能、位置到位与速度执行，并处理租约/超时和故障。
+ * 未确认 STOP 超时只转 UNKNOWN，停止意图和重试继续保留；
+ * 任一轮故障扩大为四轮停止，普通 UNKNOWN 恢复也不能清掉未确认 STOP。
+ */
 static void monitor(MotorBus *b)
 {
     unsigned i;
@@ -454,6 +527,11 @@ static void monitor(MotorBus *b)
 }
 static void activate(MotorBus *b, MotorRequest r)
 { b->active = r; b->pending = 1u; b->sent = 0u; }
+/*
+ * 选择下一事务：首次 STOP 优先，再轮转限频补发，并为查询/其它事务让出槽位；
+ * 随后处理同步、普通队列、四轮向量、停车验证、背景轮询及版本诊断。
+ * STOP 补发不重置首次反馈基线，避免持续重试令停车永远无法确认。
+ */
 static int choose(MotorBus *b)
 {
     MotorRequest r;
@@ -538,6 +616,11 @@ static int choose(MotorBus *b)
     }
     return 0;
 }
+/*
+ * 前台单步推进：检查 DMA 完成/应答超时，监视动作，选择待发事务，再检查期限和健康状态。
+ * 发送成功后才记录提交时刻、停止重试计划或运动租约；
+ * 传输 busy 时立即返回，DMA 缓冲的终止/恢复由 BSP 管理，不在此层强行复用。
+ */
 void MotorBus_Process(MotorBus *b, uint32_t now)
 {
     MotorRequest *r = &b->active;

@@ -32,6 +32,10 @@ static uint16_t SPI_TIMEOUT_UserCallback(uint8_t errorCode);
   * @param hspi: SPI handle pointer
   * @retval None
   */
+/*
+ * 工程共享 SPI MSP 入口：SPI2 转交光流适配配置，SPI5 保留 Flash 配置；
+ * 新增器件按实例分发，避免在不同模块重复定义 HAL_SPI_MspInit。
+ */
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
 {
   GPIO_InitTypeDef  GPIO_InitStruct;

@@ -1,3 +1,7 @@
+﻿/*
+ * 扫码 PB12 触发输出：高电平为空闲，按配置周期输出低脉冲。
+ * 初始化先写高再切输出；运行期用毫秒期限切相位，不用阻塞延时。
+ */
 #include "bsp_qr_trigger.h"
 #include "stm32f4xx_hal.h"
 #include "./qr/qr_config.h"
@@ -27,6 +31,10 @@ void BspQrTrigger_Init(void)
     phase_ms = 0u; /* first Poll starts the first low pulse immediately */
 }
 
+/*
+ * 每轮最多切换一次高/低相位，并从本次实际切换时刻计时；
+ * 主循环延迟会延后脉冲相位，不会在恢复时密集补发多次触发。
+ */
 void BspQrTrigger_Poll(uint32_t now_ms)
 {
     if (trig_low) {

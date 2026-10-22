@@ -1,3 +1,8 @@
+﻿/*
+ * 应用编排层：串联七电机总线、扫码、触摸、光流、陀螺与统一界面。
+ * 本层负责把按键意图分发给服务，并在耗时步骤之间重新读取时钟、服务陀螺；
+ * 协议解析、硬件恢复和绘图细节分别由对应模块维护。
+ */
 #include "qr_app.h"
 #include "app_runtime.h"
 #include "./flow/bsp_flow_spi.h"
@@ -10,6 +15,9 @@
 
 enum { BOOT_DONE, BOOT_READY, BOOT_ENABLE, BOOT_START, BOOT_STOP };
 static int reached(uint32_t now, uint32_t at) { return (int32_t)(now - at) >= 0; }
+/*
+ * 结束本次自动启动流程并请求四轮停止；停止仍由总线后续发送、重试和反馈确认。
+ */
 static void boot_cancel(QrApp *a, uint32_t now)
 {
     if (a->boot_phase == BOOT_DONE) return;
@@ -17,6 +25,11 @@ static void boot_cancel(QrApp *a, uint32_t now)
     MotorBus_Stop(&a->motor, MOTOR_WHEELS, now);
     a->motor.message = "BOOT 1-4 ABORTED / STOP VERIFY"; a->ui.redraw = 1u;
 }
+/*
+ * 四轮上电测试状态机：等待四轴新鲜健康零速反馈，再逐轴使能、逐轴启动、
+ * 逐轴停止并等待确认。步骤有期限，任一异常转取消；本流程只驱动地址 1～4。
+ * 启动分支以命令已提交为节拍依据，实际运动状态仍需总线反馈确认。
+ */
 static void boot_process(QrApp *a, uint32_t now)
 {
     MotorNode *n = &a->motor.nodes[a->boot_index];
@@ -86,6 +99,10 @@ static void boot_process(QrApp *a, uint32_t now)
     }
 }
 
+/*
+ * 把界面动作转换为总线请求：手动/只读切换、各范围 STOP、单轴或四轮测试。
+ * 运行测试前按配置检查动作类型；手动干预先取消上电测试，避免两套流程同时发起动作。
+ */
 static void manual_action(QrApp *a, QrUiAction action, uint32_t now)
 {
     uint8_t address = (uint8_t)(a->ui.selected + 1u);
@@ -144,6 +161,10 @@ static void manual_action(QrApp *a, QrUiAction action, uint32_t now)
     }
 }
 
+/*
+ * 建立所有服务及 UI 的初始状态，启动光流/陀螺的分阶段初始化，
+ * 并按 MOTOR_BOOT_SEQUENCE_ENABLED 决定是否进入四轮上电测试。
+ */
 void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
 {
     MotorBus_Init(&a->motor, motor, now);
@@ -155,6 +176,11 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
     a->boot_due = now; a->boot_deadline = now + 10000u;
     if (a->boot_phase != BOOT_DONE) a->motor.message = "BOOT 1-4 WAIT FEEDBACK";
 }
+/*
+ * 给陀螺校准提供拒绝原因：活动、未知、未确认停止或无已知阻碍。
+ * 新鲜度使用当前时间；任何轴未确认 STOP 都优先拦截。配置范围内已发现/命令的轴
+ * 若反馈不足则视为未知，从未出现的节点可缺省；返回 NONE 本身不能证明实物静止。
+ */
 static uint8_t motor_active(const QrApp *a, uint32_t now)
 {
     unsigned i;
@@ -178,6 +204,12 @@ static uint8_t motor_active(const QrApp *a, uint32_t now)
     }
     return condition;
 }
+/*
+ * 主循环的一轮：接收电机字节并推进事务/上电测试，处理触摸动作，
+ * 更新扫码触发与解码、光流和陀螺，最后提交快照并推进一个绘图片段。
+ * 在触摸、传感器、绘图前后刷新 AppClock，避免沿用已过时的时间；
+ * 多次调用 Gyro_Process 由其内部轮询间隔限频，不会把同一样本重复积分。
+ */
 void QrApp_Process(QrApp *a, uint32_t now)
 {
     int32_t x, y;

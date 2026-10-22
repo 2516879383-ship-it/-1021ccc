@@ -1,6 +1,14 @@
+﻿/*
+ * 比赛任务码纯解析层：校验固定长度的两批颜色/位置字段，成功后才发布完整结果。
+ * 每批颜色取 1～6 且不重复，位置为 1～3 的排列，两批颜色集合必须一致。
+ */
 #include "qr_task_code.h"
 #include <string.h>
 
+/*
+ * 先检查长度、分隔符、字段范围和集合约束，全部通过后写 out；
+ * 返回具体错误原因，失败时不发布部分解析结果。
+ */
 QrCodeError QrTaskCode_Parse(const uint8_t *b, size_t n, QrTaskCode *out)
 {
     QrTaskCode code;

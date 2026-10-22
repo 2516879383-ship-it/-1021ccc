@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2022 Intel Corporation
  * Copyright (c) 2022 Esco Medical ApS
  * Copyright (c) 2020 TDK Invensense
@@ -7,6 +7,10 @@
  * Adapted from Zephyr v3.7.0 icm42688.c/icm42688_common.c:
  * reset/configure/sample_fetch. See UPSTREAM.md for revision and changes.
  * SPI/device/sleep/byteorder glue is replaced; no Zephyr runtime is required.
+ */
+/*
+ * ICM-42688 寄存器驱动：经 GyroIo 访问器件，分步复位/配置并读回验证。
+ * 只启用陀螺，FIFO 旁路；读取三轴用于静止检查，输出轴选择及相对积分在服务层完成。
  */
 #include "icm42688.h"
 #include "gyro_config.h"
@@ -66,6 +70,10 @@ static int wr(Icm42688 *p,const GyroIo *io,uint8_t reg,uint8_t v)
 { p->bus_error=io->write(io->ctx,reg,v); return p->bus_error==GYRO_BUS_OK; }
 void Icm_Begin(Icm42688 *p,uint32_t now)
 { memset(p,0,sizeof(*p)); p->due=now+3u; }
+/*
+ * 按 phase 推进 bank/身份检查、软复位和设置表写入/读回；
+ * 等待以 due 期限表示，每次只推进有限事务，上电稳定期不阻塞主循环。
+ */
 int Icm_Step(Icm42688 *p,const GyroIo *io,uint32_t now)
 {
     uint8_t v;
@@ -113,6 +121,10 @@ int Icm_Step(Icm42688 *p,const GyroIo *io,uint32_t now)
     ++p->phase;
     return ICM_NO_DATA;
 }
+/*
+ * 先检查 DRDY，再突发读取一次三轴一致数据并解为大端有符号原始值。
+ * 采样时间取数据事务中点近似；复位、非法编码或饱和分别报错，同值的新 DRDY 仍算新样本。
+ */
 int Icm_Fetch(Icm42688 *p,const GyroIo *io,int16_t raw[3],uint32_t *sample_ms)
 {
     uint8_t status, readings[6]; unsigned i; uint32_t began;
@@ -130,6 +142,9 @@ int Icm_Fetch(Icm42688 *p,const GyroIo *io,int16_t raw[3],uint32_t *sample_ms)
     for (i=0u;i<3u;++i) if (raw[i]>=GYRO_SATURATION_RAW || raw[i]<=-GYRO_SATURATION_RAW) return ICM_SATURATED;
     return ICM_READY;
 }
+/*
+ * 每次轮查一个关键寄存器，检测器件复位或配置漂移；分散事务避免单轮长时间占用总线。
+ */
 int Icm_Check(Icm42688 *p,const GyroIo *io)
 {
     static const uint8_t regs[]={REG_WHO_AM_I,REG_BANK_SEL,REG_PWR_MGMT0,REG_GYRO_CONFIG0,REG_INTF_CONFIG0};

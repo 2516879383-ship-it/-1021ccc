@@ -1,5 +1,10 @@
-#ifndef QR_SERVICE_H
+﻿#ifndef QR_SERVICE_H
 #define QR_SERVICE_H
+/*
+ * 扫码对外数据契约：current 是本会话锁定任务，history 是最近一次合法结果。
+ * valid 与 history_valid 独立；accepted_seq 用于结果序号，TakeAccepted 提供一次性通知，
+ * 重新扫码应使用 BSP 会话入口先清传输积压。
+ */
 #include "qr_stream.h"
 #include "qr_task_code.h"
 typedef enum {

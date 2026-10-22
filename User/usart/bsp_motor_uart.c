@@ -1,3 +1,8 @@
+﻿/*
+ * 电机 UART5 适配：PC12=TX、PD2=RX，115200 8N1；DMA1 Stream0 循环接收、Stream7 发送。
+ * IRQ 仅搬运字节/记录故障，前台 Pump 负责解析交付和限频恢复；
+ * DMA 缓冲在片内可访问 SRAM，TX 使用独立副本直到硬件完成。
+ */
 #include "bsp_motor_uart.h"
 #include <string.h>
 
@@ -19,6 +24,9 @@ static volatile uint8_t tx_in_flight;
 static uint32_t tx_started_ms, tx_timeout_ms;
 static volatile uint32_t uart_errors, overflows;
 
+/*
+ * 立即隔离有问题的接收通道并关闭 RX 事件中断；实际 abort/重启留到前台，TX 完成链保留。
+ */
 static void quarantine(void)
 {
     receiving = 0u; restart_rx = 1u;
@@ -32,6 +40,10 @@ void BspMotorUart_Error(void)
     quarantine();
 }
 
+/*
+ * 把 DMA 新增字节搬到软件环形队列；先检查 UART 错误，避免 DMA 回调抢先交付受损数据。
+ * 队列满则记录溢出并隔离，不让不连续数据继续拼成业务帧。
+ */
 static void drain_dma(void)
 {
     uint16_t head, next;
@@ -51,6 +63,10 @@ static void drain_dma(void)
     }
 }
 
+/*
+ * 配置 UART5 引脚和两条 DMA stream；UART/RX DMA/TX DMA 使用相同抢占级，
+ * 使本模块的中断生产者串行进入，减少环形队列并发复杂度。
+ */
 void BspMotorUart_MspInit(UART_HandleTypeDef *uart)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -79,6 +95,9 @@ void BspMotorUart_MspInit(UART_HandleTypeDef *uart)
     HAL_NVIC_SetPriority(DMA1_Stream7_IRQn, 1u, 0u); HAL_NVIC_EnableIRQ(DMA1_Stream7_IRQn);
 }
 
+/*
+ * 同时表示传输忙和链路暂不可用；RX 未恢复时也拒绝发帧，保留上层停止意图等待恢复。
+ */
 static int busy(void *context)
 {
     (void)context;
@@ -86,6 +105,10 @@ static int busy(void *context)
         motor_uart.gState != HAL_UART_STATE_READY;
 }
 
+/*
+ * 复制一帧并尝试启动 TX DMA；临界区内检查本次启动前后状态，
+ * 补足旧 HAL 可能漏报的底层 DMA 启动失败。成功仅表示提交，完成由回调/看门狗跟踪。
+ */
 static int send(void *context, const uint8_t *data, uint8_t length)
 {
     HAL_StatusTypeDef result;
@@ -114,6 +137,10 @@ static int send(void *context, const uint8_t *data, uint8_t length)
     return 0;
 }
 
+/*
+ * 启动本轮循环接收：先要求 stream 真正空闲，再联合检查 HAL 返回、DMA BUSY/EN、
+ * UART DMAR/RxState 和错误码，不能把旧 BUSY 或 HAL_OK 当作接收已启动的充分证据。
+ */
 static uint8_t start_rx(void)
 {
     HAL_StatusTypeDef result;
@@ -136,6 +163,9 @@ static void configure(void)
         motor_uart.hdmarx && motor_uart.hdmatx);
 }
 
+/*
+ * 配置串口并尝试启动接收，返回给服务层的非阻塞 transport 回调；失败进入前台恢复。
+ */
 MotorTransport BspMotorUart_Init(void)
 {
     MotorTransport transport;
@@ -154,6 +184,10 @@ MotorTransport BspMotorUart_Init(void)
     return transport;
 }
 
+/*
+ * 在前台重建 RX DMA 并限频重试；只有 TX 自身异常才重置 TX，
+ * 普通 RX 错误保留在途 STOP/控制帧。HAL 有限 abort 等待期间维持 SysTick 运行。
+ */
 static void recover(uint32_t now)
 {
     uint8_t ok = 1u;
@@ -181,6 +215,10 @@ static void recover(uint32_t now)
     HAL_NVIC_ClearPendingIRQ(UART5_IRQn); HAL_NVIC_ClearPendingIRQ(DMA1_Stream0_IRQn);
     HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn); HAL_NVIC_EnableIRQ(UART5_IRQn);
 }
+/*
+ * 检查 TX 看门狗并恢复接收，将新故障一次性上报给当前服务以废弃旧协议半帧。
+ * 随后按预算提取软件队列字节；发现新的故障边界立即停止交付，下一轮继续处理。
+ */
 static void pump(MotorService *service, MotorBus *bus, uint32_t now_ms)
 {
     uint8_t bytes[64];
@@ -219,6 +257,10 @@ static void pump(MotorService *service, MotorBus *bus, uint32_t now_ms)
 void BspMotorUart_Pump(MotorService *service, uint32_t now_ms) { pump(service, 0, now_ms); }
 void BspMotorUart_PumpBus(MotorBus *bus, uint32_t now_ms) { pump(0, bus, now_ms); }
 
+/*
+ * 先锁存接收错误，再做会读取 SR/DR 的清标志操作，防止 IDLE 清除吞掉错误。
+ * 即使 RX 故障仍让 HAL 处理 TX TC，正常 IDLE 才搬运接收字节。
+ */
 void UART5_IRQHandler(void)
 {
     /* SR/DR IDLE clearing also clears PE/FE/NE/ORE in this STM32 HAL. */

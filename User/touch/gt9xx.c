@@ -23,6 +23,9 @@
 #include "./app/app_runtime.h"
 
 static uint8_t touch_runtime;
+/*
+ * 进入应用运行模式：关闭逐触点调试输出，并缩短触摸 I2C 超时，减少对主循环的占用。
+ */
 void GTP_SetRuntimeMode(void)
 {
     touch_runtime = 1u;
@@ -1153,6 +1156,10 @@ static int8_t GTP_I2C_Test( void)
 }
 
 //检测到触摸中断时调用，
+/*
+ * 前台触摸扫描入口：读取控制器并通过 AppTouch_Report 发布触点。
+ * 由 AppTouch_Process 节流调用，触摸 EXTI 中不直接执行 I2C 事务。
+ */
 void GTP_TouchProcess(void)
 {
   GTP_DEBUG_FUNC();

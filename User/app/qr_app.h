@@ -1,5 +1,9 @@
-#ifndef QR_APP_H
+﻿#ifndef QR_APP_H
 #define QR_APP_H
+/*
+ * 应用聚合状态：一个 QrApp 长期持有所有服务、统一 UI 和四轮上电测试状态。
+ * Init 只在启动时执行，Process 从主循环反复调用；服务之间通过此编排层协作。
+ */
 #include "qr_ui.h"
 #include "./motor/motor_bus.h"
 #include "./gyro/gyro_service.h"

@@ -1,6 +1,13 @@
+﻿/*
+ * 光流页面文本格式化：只读取快照，生成概览/诊断的一行字符串，不访问 SPI、不绘 LCD。
+ */
 #include "flow_ui.h"
 #include <stdio.h>
 #include <string.h>
+/*
+ * 按行号输出 counts、质量和时序诊断；原始 dx/dy 与配置后的累计轴向值分别显示，
+ * 未完成毫米标定时明确保留 counts 单位。
+ */
 void FlowUi_Line(char t[43],unsigned row,uint8_t detail,const FlowSnapshot *d)
 {
     char count[21]; t[0]='\0';

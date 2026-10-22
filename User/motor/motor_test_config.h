@@ -1,3 +1,8 @@
+﻿/*
+ * 电机调试策略集中配置：包含上电四轮测试、手动测试模板、同步缓存门控、
+ * 停止重试和校准轴范围。默认会执行地址 1～4 的上电测试；
+ * 位置脉冲/每圈脉冲与机构换算仍需实物确定，停止重试间隔不是机械停车时间保证。
+ */
 #ifndef MOTOR_TEST_CONFIG_H
 #define MOTOR_TEST_CONFIG_H
 /* Change only after confirming unloaded/safe travel and the motor's actual microsteps.

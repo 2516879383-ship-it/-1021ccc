@@ -1,5 +1,10 @@
-#ifndef FLOW_SERVICE_H
+﻿#ifndef FLOW_SERVICE_H
 #define FLOW_SERVICE_H
+/*
+ * 光流对外数据契约：raw 为器件原始突发，dx/dy 已按配置映射轴向，total_x/y 为累计 counts。
+ * comm_ok 只表示通信，tracking 表示样本质量，fresh 表示时效，valid 综合可用性；
+ * 快照时间字段单位 ms，max_process_us 单位 us。
+ */
 #include "pmw3901.h"
 typedef enum { FLOW_INIT, FLOW_READY, FLOW_ERROR } FlowState;
 typedef enum { FLOW_OK, FLOW_SPI, FLOW_ID, FLOW_BUS_DATA, FLOW_LOW_QUALITY,

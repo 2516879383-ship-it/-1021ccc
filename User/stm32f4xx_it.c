@@ -36,6 +36,11 @@
   */
 
 /* Includes ------------------------------------------------------------------*/
+/*
+ * 工程公共异常/中断入口：SysTick 提供毫秒时基，触摸 EXTI 仅通知前台。
+ * UART5/USART3 及其 DMA IRQ 在各串口适配文件中定义，避免重复入口；
+ * 故障异常保留原停机循环，不在异常中运行通信或界面恢复。
+ */
 #include "stm32f4xx_it.h"
 #include "main.h"
 #include "./touch/bsp_i2c_touch.h"
@@ -154,6 +159,9 @@ void PendSV_Handler(void)
   * @param  None
   * @retval None
   */
+/*
+ * 维护 HAL 毫秒计数，为主循环状态机、超时及传感器样本时间提供共同时间基准。
+ */
 void SysTick_Handler(void)
 {
   HAL_IncTick();
@@ -176,6 +184,10 @@ void SysTick_Handler(void)
 {
 }*/
 
+/*
+ * 触摸外部中断只翻转指示灯、置待扫描标志并清 EXTI。
+ * 实际触摸 I2C 读取由 AppTouch_Process 在前台执行，避免中断长期占用。
+ */
 void GTP_IRQHandler(void)
 {
 	if(__HAL_GPIO_EXTI_GET_IT(GTP_INT_GPIO_PIN) != RESET) //确保是否产生了EXTI Line中断

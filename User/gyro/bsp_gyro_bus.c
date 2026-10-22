@@ -1,3 +1,8 @@
+﻿/*
+ * 陀螺硬件适配：专用 I2C1，PB6=SCL、PB7=SDA，开漏且依赖外部上拉。
+ * 使用配置的 7 位地址，交给 HAL 时左移一位；触摸使用 I2C2，两者资源独立。
+ * 提供有限超时访问与共享 DWT 耗时计数，不在中断里访问器件。
+ */
 #include "bsp_gyro_bus.h"
 #include "gyro_config.h"
 #include "stm32f4xx_hal.h"
@@ -5,6 +10,9 @@
 static I2C_HandleTypeDef gyro_i2c;
 /* Touch configures I2C2 GPIO itself and uses the HAL weak MSP. Keep that path
  * untouched: initialise ONLY this private I2C1 instance's pins/clock here. */
+/*
+ * 只复位/配置本陀螺 I2C1 及引脚；启用 DWT 但不清共享计数器，保留光流计时连续性。
+ */
 static GyroBusError init(void *ctx)
 {
     GPIO_InitTypeDef g; (void)ctx;
@@ -31,6 +39,10 @@ static GyroBusError result(HAL_StatusTypeDef r)
     if (r==HAL_TIMEOUT || (gyro_i2c.ErrorCode&HAL_I2C_ERROR_TIMEOUT)) return GYRO_BUS_TIMEOUT;
     return (gyro_i2c.ErrorCode&HAL_I2C_ERROR_AF) ? GYRO_BUS_NACK : GYRO_BUS_IO;
 }
+/*
+ * 进入旧 HAL Mem_Read/Write 前检查 BUSY 与 SCL/SDA，
+ * 给正常 STOP 尾部有限等待，并用 DWT/自旋双上限避免触发 HAL 内部长 BUSY 等待。
+ */
 static GyroBusError preflight(void)
 {
     uint32_t began=DWT->CYCCNT,limit=(SystemCoreClock/1000000u)*200u,spins=20000u;
@@ -47,6 +59,9 @@ static GyroBusError preflight(void)
     }
     return GYRO_BUS_OK;
 }
+/*
+ * 有界寄存器读取：先验证长度与总线空闲，再用 HAL 内存访问并映射 NACK/忙/超时等错误。
+ */
 static GyroBusError read_reg(void *ctx,uint8_t reg,uint8_t *v,size_t n)
 {
     GyroBusError e; (void)ctx;
@@ -55,6 +70,9 @@ static GyroBusError read_reg(void *ctx,uint8_t reg,uint8_t *v,size_t n)
     return result(HAL_I2C_Mem_Read(&gyro_i2c,(uint16_t)(GYRO_ADDRESS_7BIT<<1),reg,
         I2C_MEMADD_SIZE_8BIT,v,(uint16_t)n,GYRO_BUS_TIMEOUT_MS));
 }
+/*
+ * 写一个配置寄存器，沿用读操作相同的总线预检和有限 HAL 超时。
+ */
 static GyroBusError write_reg(void *ctx,uint8_t reg,uint8_t v)
 {
     GyroBusError e; (void)ctx;
@@ -64,6 +82,9 @@ static GyroBusError write_reg(void *ctx,uint8_t reg,uint8_t v)
 }
 static uint32_t millis(void *ctx) { (void)ctx; return HAL_GetTick(); }
 static uint32_t cycles(void *ctx) { (void)ctx; return DWT->CYCCNT; }
+/*
+ * 将专用 I2C、毫秒时钟和周期计数封装为 GyroIo，供器件驱动与服务共同使用。
+ */
 GyroIo BspGyroBus_Io(void)
 {
     GyroIo io={0,init,read_reg,write_reg,millis,cycles,0u};

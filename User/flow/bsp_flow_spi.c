@@ -1,3 +1,8 @@
+﻿/*
+ * 光流硬件适配：SPI2 模式 3，PB13=SCK、PC2=MISO、PC3=MOSI、PE3=CS。
+ * HAL SPI MSP 由 Flash 文件的共享入口分发；DWT 与陀螺共用且不清零，
+ * 有限 SPI 超时和微秒延时上限用于避免主循环永久等待。
+ */
 #include "bsp_flow_spi.h"
 #include "flow_config.h"
 #include <string.h>
@@ -7,6 +12,9 @@ static SPI_HandleTypeDef spi;
 #define BSP_FLOW_CYCLES() (DWT->CYCCNT)
 #endif
 static uint32_t cycles(void *ctx) { (void)ctx; return BSP_FLOW_CYCLES(); }
+/*
+ * 用 DWT 做短时序等待，另设有限自旋次数；周期计数器异常时返回失败而不无限循环。
+ */
 static int delay_us(void *ctx,uint32_t us)
 {
     uint32_t start=cycles(ctx), limit=us*(SystemCoreClock/1000000u), spins=100000u;
@@ -15,6 +23,9 @@ static int delay_us(void *ctx,uint32_t us)
 }
 static void select_cs(void *ctx,uint8_t high)
 { (void)ctx; HAL_GPIO_WritePin(GPIOE,GPIO_PIN_3,high ? GPIO_PIN_SET : GPIO_PIN_RESET); }
+/*
+ * 仅配置 SPI2 及光流引脚；先置片选高再切输出，不触碰 Flash 的 SPI5 资源。
+ */
 void BspFlowSpi_MspInit(SPI_HandleTypeDef *h)
 {
     GPIO_InitTypeDef g;
@@ -30,6 +41,9 @@ void BspFlowSpi_MspInit(SPI_HandleTypeDef *h)
     HAL_GPIO_Init(GPIOB,&g);
     g.Pin=GPIO_PIN_2|GPIO_PIN_3; HAL_GPIO_Init(GPIOC,&g);
 }
+/*
+ * 重置并初始化专用 SPI2，启用共享 DWT 并验证计数器正在推进。
+ */
 static int init(void *ctx)
 {
     uint32_t before; unsigned i;
@@ -56,6 +70,9 @@ static int exchange(void *ctx,const uint8_t *tx,uint8_t *rx,size_t size)
     if (size==0u || size>12u) return 0;
     return HAL_SPI_TransmitReceive(&spi,(uint8_t *)tx,rx,(uint16_t)size,FLOW_SPI_TIMEOUT_MS)==HAL_OK;
 }
+/*
+ * 组装传感器驱动所需硬件接口与每微秒周期数，使协议/服务可用主机替身验证。
+ */
 FlowIo BspFlowSpi_Io(void)
 {
     FlowIo io={0,init,select_cs,exchange,delay_us,cycles,0};

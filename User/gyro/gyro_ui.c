@@ -1,3 +1,7 @@
+﻿/*
+ * 陀螺页面文本格式化：根据快照有效位显示角速度、相对角和校准/GAP 原因。
+ * 只生成字符串，不访问传感器或更新积分；避免浮点 printf 带入较大的运行库和栈成本。
+ */
 #include "gyro_ui.h"
 #include "gyro_config.h"
 #include <stdio.h>
@@ -11,6 +15,9 @@ static void decimal(char t[20],double value)
     magnitude=(unsigned long)(v<0 ? -v : v);
     snprintf(t,20,"%s%lu.%02lu",v<0 ? "-" : "",magnitude/100u,magnitude%100u);
 }
+/*
+ * 输出概览或诊断行；角度无效时显示 --/GAP，不能把保留的旧角度显示成当前可用结果。
+ */
 void GyroUi_Line(char t[43],unsigned row,uint8_t detail,const GyroSnapshot *d)
 {
     char a[20],b[20]; t[0]='\0';

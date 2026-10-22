@@ -1,3 +1,8 @@
+﻿/*
+ * 单旋转轴陀螺服务：分步启动 ICM-42688，轮询 DRDY，静止校准零偏，
+ * 发布选定轴角速度（deg/s）及连续有效样本的相对转角（deg）。
+ * 无 FIFO 时缺口不可补算；积分是相对量，会漂移，不是绝对航向或完整姿态融合。
+ */
 #include "gyro_service.h"
 #include "gyro_config.h"
 #include <string.h>
@@ -8,12 +13,19 @@ static GyroCalibration motor_rejection(uint8_t condition)
     return condition == GYRO_MOTOR_STOP ? GYRO_CAL_STOP :
         condition == GYRO_MOTOR_UNKNOWN ? GYRO_CAL_UNKNOWN : GYRO_CAL_MOTOR;
 }
+/*
+ * 锁存角度连续性中断，清积分历史和 angle_valid，保留旧角数值作诊断；
+ * 后续新速率不会自动把旧轨迹恢复为有效，需 ZERO 或成功 CAL 建立新起点。
+ */
 static void gap(GyroService *s,GyroError e)
 {
     if (!s->data.angle_gap) ++s->data.gaps;
     s->data.angle_gap=1u; s->data.angle_valid=0u; s->have_previous=0u;
     s->data.error=s->data.last_fault=e;
 }
+/*
+ * 终止本次校准并中断角度轨迹，保留原偏置；失败样本不能覆盖已知偏置。
+ */
 static void cal_fail(GyroService *s,GyroCalibration c)
 {
     s->data.calibration=c;
@@ -26,6 +38,9 @@ static GyroError chip_error(int r)
     if (r==ICM_CONFIG_ERROR) return GYRO_CONFIG;
     return GYRO_BUS;
 }
+/*
+ * 总线/器件异常使样本和积分无效，若在校准则失败；按退避期限安排重新初始化。
+ */
 static void fault(GyroService *s,int r,uint32_t now)
 {
     if (s->data.calibration==GYRO_CAL_RUNNING) cal_fail(s,GYRO_CAL_ERROR);
@@ -35,6 +50,10 @@ static void fault(GyroService *s,int r,uint32_t now)
     s->due=now+s->retry_ms;
     if (s->retry_ms<GYRO_RETRY_MAX_MS) s->retry_ms*=2u;
 }
+/*
+ * 启动一次器件重建：清校准有效性和样本连续性，保留失败原因供诊断，
+ * 器件复位后必须重新校准，不能沿用旧轨迹。
+ */
 static void start(GyroService *s,uint32_t now)
 {
     GyroBusError e;
@@ -47,6 +66,9 @@ static void start(GyroService *s,uint32_t now)
     e=s->io.init(s->io.ctx);
     if (e!=GYRO_BUS_OK) { s->chip.bus_error=e; fault(s,ICM_BUS_ERROR,now); }
 }
+/*
+ * 绑定 I2C/时钟接口并应用安装轴与符号配置，启动分阶段初始化。
+ */
 void Gyro_Init(GyroService *s,GyroIo io,uint32_t now)
 {
     memset(s,0,sizeof(*s)); s->io=io;
@@ -58,6 +80,10 @@ static int fresh(const GyroService *s,uint32_t now)
     return s->data.state==GYRO_RUNNING && s->data.have_sample && s->data.raw_valid &&
         (uint32_t)(now-s->data.sample_ms)<=GYRO_STALE_MS;
 }
+/*
+ * 仅在样本新鲜且无电机活动/未知/未确认停止原因时启动静止校准。
+ * 清本次统计和积分历史，偏置要等完整连续窗口通过质量检查后才更新；电机门控仅为辅助。
+ */
 int Gyro_RequestCalibration(GyroService *s,uint32_t now,uint8_t motor_active)
 {
     if (s->data.calibration==GYRO_CAL_RUNNING) return 0;
@@ -70,6 +96,10 @@ int Gyro_RequestCalibration(GyroService *s,uint32_t now,uint8_t motor_active)
     memset(s->mean,0,sizeof(s->mean)); memset(s->m2,0,sizeof(s->m2));
     return 1;
 }
+/*
+ * 在已有校准且样本新鲜时，把最近已获取样本作为相对角零点；
+ * 不改偏置，也不把触摸或绘图时刻当采样边界。
+ */
 int Gyro_ZeroAngle(GyroService *s,uint32_t now)
 {
     if (!fresh(s,now) || !s->data.calibrated || s->data.calibration==GYRO_CAL_RUNNING) return 0;
@@ -78,6 +108,10 @@ int Gyro_ZeroAngle(GyroService *s,uint32_t now)
     s->previous_rate=s->data.rate_dps; s->have_previous=1u; ++s->data.zeros;
     return 1;
 }
+/*
+ * 用 Welford 在线算法累计三轴均值/方差，并检查幅值和极差。
+ * 满足样本数、持续时间及静止阈值后，只发布安装轴零偏并把相对角置零；运动则立即失败。
+ */
 static int calibrate(GyroService *s,uint32_t now)
 {
     unsigned i; float x,delta; GyroSnapshot *d=&s->data;
@@ -104,6 +138,11 @@ static int calibrate(GyroService *s,uint32_t now)
     d->angle_gap=0u; d->angle_valid=1u; s->have_previous=0u;
     return 1;
 }
+/*
+ * 单步推进错误退避、器件初始化、校准期限、轮询/配置复查及 DRDY 采样。
+ * 无 FIFO 时轮询空档或样本间隔超限会断开积分；只对有效连续样本做梯形积分，
+ * 用实际样本 dt（毫秒）换算秒，不以调用次数或假定周期累加角度。
+ */
 static void process(GyroService *s,uint32_t now,uint8_t motor_active)
 {
     GyroSnapshot *d=&s->data; uint32_t at,dt,poll_dt; int r; int16_t raw[3];
@@ -174,6 +213,9 @@ static void process(GyroService *s,uint32_t now,uint8_t motor_active)
         s->previous_rate=d->rate_dps; s->have_previous=1u;
     }
 }
+/*
+ * 统一主循环的陀螺服务入口，内部限频处理；额外记录单步最大微秒耗时供调度验收。
+ */
 void Gyro_Process(GyroService *s,uint32_t now,uint8_t motor_active)
 {
     uint32_t began=s->io.cycles(s->io.ctx),cost;
@@ -181,6 +223,10 @@ void Gyro_Process(GyroService *s,uint32_t now,uint8_t motor_active)
     cost=(uint32_t)(s->io.cycles(s->io.ctx)-began)/s->io.cycles_per_us;
     if (cost>s->data.max_process_us) s->data.max_process_us=cost;
 }
+/*
+ * 只复制数据并按当前时刻检查新鲜度；过期时清输出有效位，旧角数值仍可用于诊断。
+ * 使用方必须检查 raw_valid/rate_valid/angle_valid，不能仅因数值存在就认为可用于控制。
+ */
 void Gyro_GetSnapshot(const GyroService *s,uint32_t now,GyroSnapshot *out)
 {
     *out=s->data; out->age_ms=out->have_sample ? now-out->sample_ms : UINT32_MAX;

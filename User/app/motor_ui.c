@@ -1,3 +1,7 @@
+﻿/*
+ * 保留的单电机遥测页面，当前统一应用显示由 qr_ui.c 负责。
+ * 这里每 100 ms 比较并刷新变化行，属于原单机入口，不能替代统一界面的分步绘图调度。
+ */
 #include "motor_ui.h"
 #include "app_runtime.h"
 #include "./lcd/bsp_lcd.h"
@@ -45,6 +49,9 @@ void MotorUi_Init(void)
     LCD_Clear(LCD_COLOR_BLACK);
 }
 
+/*
+ * 格式化单电机位置、速度、状态和触摸诊断；字段过期显示 STALE，触摸只作状态展示。
+ */
 void MotorUi_Process(const MotorSnapshot *d, const char *stage, uint32_t now_ms)
 {
     char text[UI_COLS + 1u];

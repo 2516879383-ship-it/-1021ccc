@@ -1,3 +1,7 @@
+﻿/*
+ * Emm 协议纯数据层：构造查询/使能/速度/位置/STOP/组帧，以及从任意分片字节流提取应答。
+ * 本层不操作 UART、不等待 ACK，也不判定动作完成；调度和反馈时效由服务层负责。
+ */
 #include "emm_protocol.h"
 #include <string.h>
 
@@ -32,11 +36,17 @@ EmmCommand Emm_Move(uint8_t address, uint8_t direction, uint16_t rpm,
     c.bytes[8] = (uint8_t)(pulses >> 8); c.bytes[9] = (uint8_t)pulses;
     return c; /* relative movement, no synchronous cache */
 }
+/*
+ * 构造 Addr FE 98 00 6B 非同步立即停止帧；不发送失能命令。
+ */
 EmmCommand Emm_Stop(uint8_t address)
 {
     EmmCommand c = command(address, EMM_STOP, 5u); c.bytes[2] = 0x98u; return c;
 }
 
+/*
+ * 带参数校验和同步缓存位的速度帧；非法参数用 length=0 表示不可提交。
+ */
 EmmCommand Emm_VelocityEx(uint8_t address, uint8_t direction, uint16_t rpm,
                           uint8_t acceleration, uint8_t cached)
 {
@@ -44,6 +54,9 @@ EmmCommand Emm_VelocityEx(uint8_t address, uint8_t direction, uint16_t rpm,
     if (!address || address > 7u || direction > 1u || rpm > 3000u || cached > 1u) c.length = 0u;
     c.bytes[6] = cached; return c;
 }
+/*
+ * 构造带位置模式和同步缓存位的位置帧，脉冲多字节字段按协议高字节在前编码。
+ */
 EmmCommand Emm_MoveEx(uint8_t address, uint8_t direction, uint16_t rpm,
     uint8_t acceleration, uint32_t pulses, EmmPositionMode mode, uint8_t cached)
 {
@@ -52,6 +65,9 @@ EmmCommand Emm_MoveEx(uint8_t address, uint8_t direction, uint16_t rpm,
         (unsigned)mode > 2u || cached > 1u) c.length = 0u;
     c.bytes[10] = (uint8_t)mode; c.bytes[11] = cached; return c;
 }
+/*
+ * 将不重复地址、同类且非同步的速度/位置子帧打包为 0xAA 多机帧，校验长度和参数。
+ */
 int Emm_Multi(EmmCommand *out, const EmmCommand *m, uint8_t count)
 {
     EmmCommand c;
@@ -79,6 +95,9 @@ int Emm_Multi(EmmCommand *out, const EmmCommand *m, uint8_t count)
     c.bytes[length - 1u] = 0x6Bu; c.length = (uint8_t)length;
     *out = c; return 1;
 }
+/*
+ * 按固定地址 1～4 构造四轮速度组帧；RPM 符号转为协议方向位，幅值转为转速。
+ */
 int Emm_Wheels(EmmCommand *out, const int32_t rpm[4], uint8_t acceleration)
 {
     EmmCommand m[4];
@@ -118,6 +137,10 @@ static void discard(EmmParser *p, uint8_t count)
     memmove(p->bytes, p->bytes + count, p->used);
 }
 
+/*
+ * 把已满足长度/帧尾要求的应答解为结构体，检查符号位及允许的结果码。
+ * 速度/位置采用独立符号位和无符号幅值，避免把位置幅值误当有符号 32 位数。
+ */
 static int decode(const uint8_t *b, EmmFrame *f)
 {
     uint32_t magnitude;
@@ -145,6 +168,10 @@ static int decode(const uint8_t *b, EmmFrame *f)
     return 1;
 }
 
+/*
+ * 支持半帧、粘帧及噪声：按地址/功能码确定长度，不完整则保留；
+ * 坏候选逐字节丢弃重新同步，完整合法帧通过回调交给服务层做事务匹配。
+ */
 void EmmParser_Feed(EmmParser *p, const uint8_t *data, size_t length,
                     EmmFrameHandler handler, void *context)
 {

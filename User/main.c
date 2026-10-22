@@ -1,3 +1,8 @@
+﻿/*
+ * 程序入口总览：先完成 HAL、180 MHz 时钟、调试串口、触摸和 LCD 初始化，
+ * 再建立电机/扫码通信与应用状态，最后由 QrApp_Process 持续推进各模块。
+ * 这是协作式主循环；各服务需及时返回，运行期等待由状态和时间期限表达。
+ */
 #include "main.h"
 #include "./usart/bsp_debug_usart.h"
 #include "./lcd/bsp_lcd.h"
@@ -7,6 +12,10 @@
 #include "./usart/bsp_qr_uart.h"
 #include "./usart/bsp_qr_trigger.h"
 
+/*
+ * 一次性初始化硬件并进入统一调度。app 使用静态存储，长期保留七轴、扫码、
+ * 光流、陀螺和界面的状态；默认四轮上电测试是否执行由电机配置宏决定。
+ */
 int main(void)
 {
     static QrApp app;
@@ -33,6 +42,10 @@ int main(void)
     }
 }
 
+/*
+ * 配置 HSE=25 MHz、PLL 系统时钟 180 MHz，以及 APB1=45 MHz、APB2=90 MHz。
+ * HAL 毫秒时基和传感器 DWT 耗时换算依赖该时钟配置；配置失败时停留在故障循环。
+ */
 static void SystemClock_Config(void)
 {
   RCC_ClkInitTypeDef RCC_ClkInitStruct;

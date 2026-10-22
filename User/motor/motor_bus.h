@@ -1,5 +1,9 @@
-#ifndef MOTOR_BUS_H
+﻿#ifndef MOTOR_BUS_H
 #define MOTOR_BUS_H
+/*
+ * 七轴总线公共接口与状态：应用通过提交/STOP API 表达意图，Process/Receive 推进结果。
+ * MotorActionState 是软件事务状态，不能单独代替实物反馈；所有时间使用毫秒。
+ */
 #include "motor_service.h"
 
 #define MOTOR_COUNT 7u
@@ -18,10 +22,19 @@ typedef enum {
 } MotorActionState;
 typedef enum { MOTOR_SYNC_IDLE, MOTOR_SYNC_PREPARE, MOTOR_SYNC_TRIGGER,
                MOTOR_SYNC_VERIFY, MOTOR_SYNC_DONE, MOTOR_SYNC_LOCKED } MotorSyncState;
+/*
+ * 动作参数单位：速度由 command 中的 RPM 表达；位置脉冲数需配合 pulses_per_rev
+ * 换算到反馈每圈 65536 计数；lease_ms 用于速度租约，timeout_ms 用于位置监视。
+ */
 typedef struct {
     EmmCommand command;
     uint32_t pulses_per_rev, timeout_ms, lease_ms;
 } MotorAction;
+/*
+ * 单轴状态：data 保存反馈及其独立时间戳/序号；target_* 支持到位判断。
+ * stop_unconfirmed 是持续停止意图；stop_sent/stop_attempts 记录提交，
+ * stop_speed_seq/stop_status_seq 和 stop_first_ms 约束可用于确认停车的新反馈。
+ */
 typedef struct {
     MotorSnapshot data;
     MotorActionState action;
@@ -42,6 +55,11 @@ typedef struct {
     uint32_t id, expires_ms;
     uint8_t mask, address, code, kind;
 } MotorRequest;
+/*
+ * 总线状态由前台独占更新。queue/wheels/sync 是待发来源，active 是当前事务；
+ * pending/sent/tx_wait 区分等待事务、已提交、等待硬件结束。
+ * stop_mask 仅表示首次待发位，清除此位不等于停止已确认。
+ */
 typedef struct {
     MotorTransport transport;
     EmmParser parser;

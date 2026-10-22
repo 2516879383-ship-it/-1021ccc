@@ -48,6 +48,10 @@ void DEBUG_USART_Config(void)
   * @param huart: UART handle
   * @retval 无
   */
+/*
+ * 工程共享 UART MSP 入口：UART5 转交电机、USART3 转交扫码，USART1 保留调试口配置。
+ * 各串口仅配置自己的引脚/DMA，HAL 共享回调由 bsp_uart_callbacks.c 统一分发。
+ */
 void HAL_UART_MspInit(UART_HandleTypeDef *huart)
 {  
   GPIO_InitTypeDef  GPIO_InitStruct;

@@ -1,5 +1,10 @@
-#ifndef GYRO_SERVICE_H
+﻿#ifndef GYRO_SERVICE_H
 #define GYRO_SERVICE_H
+/*
+ * 陀螺对外数据契约：raw_dps 为安装轴原始角速度，bias_dps 为校准偏置，
+ * rate_dps 为扣偏置角速度，angle_deg 为相对积分角；分别检查有效位及 age_ms。
+ * GYRO_MOTOR_* 参数表示校准拒绝原因枚举，不能当成实物静止证明。
+ */
 #include "icm42688.h"
 typedef enum { GYRO_INIT, GYRO_RUNNING, GYRO_ERROR } GyroState;
 typedef enum { GYRO_OK, GYRO_BUS, GYRO_ID, GYRO_RESET, GYRO_CONFIG,

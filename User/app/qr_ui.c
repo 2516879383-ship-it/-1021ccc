@@ -1,3 +1,8 @@
+﻿/*
+ * 统一界面层：处理 QR/MOTOR/FLOW/GYRO 页面和触摸命中，输出服务动作枚举。
+ * 刷新先冻结九行文本，再用可取消的绘图状态机逐轮画条带/短文本；
+ * 每次返回应用主循环，让电机通信和传感器继续获得运行机会。
+ */
 #include "qr_ui.h"
 #include "./flow/flow_ui.h"
 #include "./gyro/gyro_ui.h"
@@ -7,6 +12,9 @@
 #include "./motor/motor_test_config.h"
 
 static const uint16_t row_y[9] = {8u, 32u, 60u, 92u, 114u, 136u, 158u, 180u, 202u};
+/*
+ * 将一行文本保存到当前作业目标；标题按可用像素限制为 26 字符，正文最多 42 字符。
+ */
 static void line(QrUi *u, unsigned i, const char *text)
 {
     /* 296 title pixels / Font16.Width(11) = 26 complete characters. */
@@ -16,6 +24,10 @@ static void line(QrUi *u, unsigned i, const char *text)
 void QrUi_Init(QrUi *u)
 { memset(u, 0, sizeof(*u)); u->redraw = 1u; }
 
+/*
+ * 只在按下边沿处理坐标，按住不重复。切页/布局改变请求重绘，
+ * 业务按钮返回动作给应用；CAL/ZERO 依靠正常快照更新结果，不额外触发整页清除。
+ */
 QrUiAction QrUi_Touch(QrUi *u, int32_t x, int32_t y, uint8_t down)
 {
     uint8_t edge = (uint8_t)(down && !u->was_down);
@@ -70,6 +82,9 @@ static const char *error(const QrSnapshot *d)
     default: return "UNKNOWN";
     }
 }
+/*
+ * 从扫码服务快照生成九行目标文本，显示当前会话、锁定结果与错误/重复统计。
+ */
 static void qr_page(QrUi *u, const QrService *s, uint32_t now)
 {
     char t[43];
@@ -96,6 +111,10 @@ static void counts(char *t, size_t size, int64_t value)
     uint64_t v = (uint64_t)(value < 0 ? -value : value);
     snprintf(t, size, "%s%lu", value < 0 ? "-" : "", (unsigned long)v);
 }
+/*
+ * 生成七轴概览或单轴详情；速度/状态按各自新鲜度显示，
+ * 停止未确认独立于普通 action 显示，避免 UNKNOWN 掩盖仍然存在的停止意图。
+ */
 static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
 {
     static const char *actions[] = {"ENABLE", "SPEED", "POSITION", "WHEELS 0xAA", "SYNC WHEELS"};
@@ -143,6 +162,9 @@ static void motor_page(QrUi *u, const MotorBus *b, uint32_t now)
    No service is called here: all modules resume in the common app loop. */
 enum { DRAW_IDLE, DRAW_CLEAR, DRAW_ROWS, DRAW_TEXT, DRAW_BUTTONS, DRAW_LABELS };
 enum { JOB_MOTOR=1, JOB_FLOW=2, JOB_GYRO=4, JOB_DETAIL=8, JOB_MANUAL=16 };
+/*
+ * 一次最多绘制两个字符，offset 记录进度，下轮继续同一行或按钮标签。
+ */
 static void text_step(QrUi *u, uint16_t x, uint16_t y, const char *text, sFONT *font)
 {
     char part[3]; unsigned n=0u;
@@ -152,6 +174,11 @@ static void text_step(QrUi *u, uint16_t x, uint16_t y, const char *text, sFONT *
     LCD_DisplayStringAt((uint16_t)(x+u->offset*font->Width),y,(uint8_t *)part,LEFT_MODE);
     u->offset=(uint8_t)(u->offset+n);
 }
+/*
+ * 推进一个绘图状态：整屏条带清除、变化行清除、文字、按钮背景或标签。
+ * 每步至多一块 480×4 矩形或两个字形；这里不调用业务服务，
+ * 实际绘图超时仍可能超过预算，由外层耗时统计和陀螺 GAP 检测如实反映。
+ */
 static void draw_step(QrUi *u)
 {
     static const uint16_t bx[5]={160u,8u,248u,312u,400u};
@@ -210,6 +237,10 @@ static void draw_step(QrUi *u)
         }
     }
 }
+/*
+ * 布局变化立即取消旧作业并冻结新页面；普通刷新在空闲且间隔至少 100 ms 时取新快照。
+ * 已冻结作业每轮继续推进，不让每个字符等待刷新周期；绘制完成前不混入下一批文本。
+ */
 void QrUi_Process(QrUi *u, const QrService *s, const MotorBus *motor, const FlowSnapshot *flow,
                   const GyroSnapshot *gyro, uint32_t now)
 {

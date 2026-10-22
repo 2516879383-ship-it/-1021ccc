@@ -1,3 +1,8 @@
+﻿/*
+ * 保留的原单电机演示流程：使能→速度运行→停车确认→位置运动→失能确认。
+ * 故障清理含失能步骤，只适用于原演示用途；当前主程序不调用本流程，
+ * 七轴尤其升降轴使用 MotorBus 的停止策略。
+ */
 #include "motor_demo.h"
 #include "motor_demo_config.h"
 #include <string.h>
@@ -59,6 +64,10 @@ static int new_status(const MotorDemo *d, const MotorSnapshot *data, uint32_t no
            (uint32_t)(now - data->status_ms) <= MOTOR_DATA_STALE_MS;
 }
 
+/*
+ * 按演示状态分别提交命令、等 ACK 和验证反馈；零速要看新样本，到位另看位置变化和状态。
+ * 当前七轴应用不经此函数启动，也不使用这里的故障失能清理。
+ */
 void MotorDemo_Process(MotorDemo *d, MotorService *s, uint32_t now)
 {
     int result;

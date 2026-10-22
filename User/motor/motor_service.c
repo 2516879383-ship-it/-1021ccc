@@ -1,3 +1,7 @@
+﻿/*
+ * 保留的单电机服务：用于原单机示例和兼容测试，当前主程序七轴调度使用 MotorBus。
+ * 与七轴服务共用协议层和传输抽象，但轮询周期、超时和状态机各自独立。
+ */
 #include "motor_service.h"
 #include <string.h>
 
@@ -20,6 +24,9 @@ static void finish(MotorService *s, uint8_t result)
     }
 }
 
+/*
+ * 只让当前已发查询发布新鲜字段；迟到/无关应答不确认命令，异步 9F 不作为 ACK。
+ */
 static void received(void *context, const EmmFrame *f)
 {
     MotorService *s = (MotorService *)context;
@@ -77,6 +84,10 @@ void MotorService_TransportError(MotorService *s, MotorError error, uint32_t now
     s->next_send_ms = now_ms + 100u;
 }
 
+/*
+ * 推进单轴三字段轮询、一个待发控制及 DMA/ACK 期限。
+ * 查询可有限重试，普通控制不按查询策略重放；本函数按主循环调用，不阻塞等待反馈。
+ */
 void MotorService_Process(MotorService *s, uint32_t now_ms)
 {
     s->now_ms = now_ms;

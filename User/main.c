@@ -1,6 +1,6 @@
 /*
  * 入口：HAL/时钟、触摸与 LCD、电机与扫码、应用初始化。
- * QrApp_Init 内建立 K230 USART1 专用视觉通信；上电只监听，不自动扫描或运动。
+ * QrApp_Init 建立 K230 视觉通信及固定启停区2的比赛调度；上电等待显式启动。
  * 协作式主循环逐步推进通信、传感器和界面。
  */
 #include "main.h"
@@ -33,7 +33,7 @@ int main(void)
     BspQrTrigger_Init();
     QrApp_Init(&app, motor, qr_ready, HAL_GetTick());
     while (1) {
-        /* Diagnostics and explicitly started chassis actions share one motor bus. */
+        /* Communication, sensors, mission and UI advance without blocking. */
         QrApp_Process(&app, HAL_GetTick());
     }
 }

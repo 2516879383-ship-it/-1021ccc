@@ -36,8 +36,7 @@ int main(void)
     BspQrTrigger_Init();
     QrApp_Init(&app, motor, qr_ready, HAL_GetTick());
     while (1) {
-        /* QR + seven-node bus, with the configured one-shot wheel boot test.
-           The original MotorDemo remains disabled. */
+        /* Diagnostics and explicitly started chassis actions share one motor bus. */
         QrApp_Process(&app, HAL_GetTick());
     }
 }

@@ -73,6 +73,7 @@ typedef struct {
     uint8_t stop_cursor, verify_cursor, retry_yield;
     uint32_t now_ms, next_id, next_send_ms, tx_ms, tx_limit_ms, reply_ms;
     uint32_t sync_id, sync_deadline, group_id, next_wheel_ms;
+    uint32_t wheel_frames, last_wheel_ms; /* successful transport submissions, not ACKs */
     uint32_t tx_frames, tx_bytes, rx_frames, rx_bytes, ignored_frames, timeout_count, transport_errors;
     uint32_t started_ms, max_step_ms, last_step_ms;
     const char *message;

@@ -674,6 +674,7 @@ void MotorBus_Process(MotorBus *b, uint32_t now)
             n->stop_retry_ms = now + (n->stop_attempts < MOTOR_STOP_FAST_ATTEMPTS ?
                 MOTOR_STOP_RETRY_MS : MOTOR_STOP_BACKOFF_MS);
         } else if (r->kind == GROUP) {
+            ++b->wheel_frames; b->last_wheel_ms = now;
             b->next_wheel_ms = now + 100u;
             for (i = 0u; i < 4u; ++i) {
                 MotorAction a = r->action;

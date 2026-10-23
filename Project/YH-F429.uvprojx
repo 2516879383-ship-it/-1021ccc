@@ -874,6 +874,26 @@
               <FilePath>..\User\app\qr_app.c</FilePath>
             </File>
             <File>
+              <FileName>chassis_kinematics.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\chassis\chassis_kinematics.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_odometry.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\chassis\chassis_odometry.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\chassis\chassis.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\chassis\chassis_ui.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_qr_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\usart\bsp_qr_uart.c</FilePath>

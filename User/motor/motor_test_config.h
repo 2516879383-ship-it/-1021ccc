@@ -1,8 +1,5 @@
-﻿/*
- * 电机调试策略集中配置：包含上电四轮测试、手动测试模板、同步缓存门控、
- * 停止重试和校准轴范围。默认会执行地址 1～4 的上电测试；
- * 位置脉冲/每圈脉冲与机构换算仍需实物确定，停止重试间隔不是机械停车时间保证。
- */
+/* Manual bench templates, sync-cache gates and persistent STOP policy.
+   Vehicle motion is configured separately in chassis/chassis_config.h. */
 #ifndef MOTOR_TEST_CONFIG_H
 #define MOTOR_TEST_CONFIG_H
 /* Change only after confirming unloaded/safe travel and the motor's actual microsteps.
@@ -14,17 +11,6 @@
 #define MOTOR_TEST_ACCELERATION 100u
 #define MOTOR_TEST_DIRECTION 0u
 #define MOTOR_TEST_LEASE_MS 1000u
-/* One-shot power-on test: enable 1..4, start 1..4, then stop 1..4.
-   Set to 0 to restore the previous read-only boot. No motion on 5..7.
-   TEMPORARY 2026-10-22 gyro bench bring-up: set to 0u here so a bench without
-   motor feedback does not latch a never-confirmed wheel STOP (STOP UNCONF) and
-   block gyro CAL. Restore to 1u before any vehicle test that expects the
-   four-wheel power-on sequence. */
-#ifndef MOTOR_BOOT_SEQUENCE_ENABLED
-#define MOTOR_BOOT_SEQUENCE_ENABLED 0u
-#endif
-#define MOTOR_BOOT_RPM 10u
-#define MOTOR_BOOT_STEP_MS 1000u
 #define MOTOR_TEST_WHEEL_RPM {10, -12, 14, -16}
 #define MOTOR_TEST_PULSES 32u
 #define MOTOR_TEST_POSITION_MODE EMM_REL_ACTUAL

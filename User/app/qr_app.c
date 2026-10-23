@@ -91,7 +91,13 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
     a->ui.chassis=&a->chassis;
     VisionService_Init(&a->vision,BspVisionUart_Init(),now);
     a->ui.vision=&a->vision;
+    MissionRuntime_Init(&a->mission_runtime,&a->chassis,&a->motor,&a->vision,0);
+    Mission_Init(&a->mission,MissionRuntime_Port(&a->mission_runtime));
+    a->ui.mission=&a->mission;
+    Mission_Process(&a->mission,now);
 }
+int QrApp_StartMission(QrApp *a, uint32_t now)
+{ return Mission_Start(&a->mission,now); }
 /*
  * 给陀螺校准提供拒绝原因：活动、未知、未确认停止或无已知阻碍。
  * 新鲜度使用当前时间；任何轴未确认 STOP 都优先拦截。配置范围内已发现/命令的轴
@@ -141,7 +147,16 @@ void QrApp_Process(QrApp *a, uint32_t now)
     AppTouch_Process(now); AppTouch_GetState(&x, &y, &down);
     now = AppClock_Now();
     action = QrUi_Touch(&a->ui, x, y, down);
-    if (action==QR_UI_VISION_SCAN) {
+    /* A running mission owns all action intent, even when diagnostics are shown.
+       Every STOP cancels the mission first; other commands cannot steal it. */
+    if (action==QR_UI_STOP_ALL || action==QR_UI_STOP_WHEELS || action==QR_UI_STOP_AXIS ||
+        (action==QR_UI_VISION_STOP && Mission_IsRunning(&a->mission))) Mission_Stop(&a->mission,now);
+    if (Mission_IsRunning(&a->mission) && action!=QR_UI_NONE && action!=QR_UI_STOP_ALL &&
+        action!=QR_UI_STOP_WHEELS && action!=QR_UI_STOP_AXIS) {
+        a->motor.message="RACE BUSY - STOP FIRST"; action=QR_UI_NONE;
+    }
+    if (action==QR_UI_MISSION_START) (void)QrApp_StartMission(a,now);
+    else if (action==QR_UI_VISION_SCAN) {
         (void)VisionService_Start(&a->vision,a->ui.vision_mode,a->ui.vision_color,
             a->ui.vision_zone,a->ui.vision_position,(uint16_t)(a->vision.pose_id+1u),now);
     } else if (action==QR_UI_VISION_STOP) VisionService_Stop(&a->vision,now);
@@ -173,6 +188,7 @@ void QrApp_Process(QrApp *a, uint32_t now)
     Flow_GetSnapshot(&a->flow, now, &flow);
     Gyro_GetSnapshot(&a->gyro, now, &gyro);
     Chassis_Process(&a->chassis,&flow,&gyro,now);
+    Mission_Process(&a->mission,AppClock_Now());
     now = AppClock_Now();
     QrUi_Process(&a->ui, &a->qr, &a->motor, &flow, &gyro, now);
     if (AppClock_Now() - now > a->ui.max_step_ms) a->ui.max_step_ms = AppClock_Now() - now;

@@ -875,8 +875,40 @@ static void test_chassis_active(void)
         (unsigned long)a.gyro.data.max_interval_ms,(unsigned long)a.qr.data.duplicates);
     lcd_timed=trigger_measure=0u;
 }
+static uint8_t vision_last_command;
+static unsigned vision_sent;
+static int vision_send(void *ctx,const uint8_t *bytes,uint8_t length)
+{
+    (void)ctx; CHECK(length>=4u && bytes[0]==0xAAu);
+    vision_last_command=bytes[2]; ++vision_sent; return 1;
+}
+static void test_vision_screen(void)
+{
+    QrApp a;
+    VisionTransport t={0,vision_send,motor_busy};
+    uint32_t now;
+    CHECK(BspQrUart_Init()); app_fixture(&a,0u);
+    VisionService_Init(&a.vision,t,0u);
+    for (now=0u;now<2000u;++now) app_step(&a,now);
+    click(&a,20,14,now); CHECK(a.ui.vision_page && !a.ui.motor_page);
+    for(now+=2u;now<4000u;++now) app_step(&a,now);
+    CHECK(strstr(lines[0],"VISION") && !bad_layout && !app_motor.count);
+    save_image("vision_idle.pgm");
+    click(&a,20,66,now); CHECK(a.ui.vision_mode==1u);
+    click(&a,20,98,now+2u); CHECK(a.ui.vision_color==2u);
+    click(&a,200,98,now+4u); CHECK(a.ui.vision_zone==2u);
+    click(&a,340,98,now+6u); CHECK(a.ui.vision_position==2u);
+    click(&a,20,245,now+8u); CHECK(a.vision.state==VISION_CONFIGURING && vision_sent==1u);
+    CHECK(vision_last_command==VISION_STOP && !app_motor.count);
+    click(&a,170,245,now+10u); CHECK(a.vision.state==VISION_STOPPING && !app_motor.count);
+    click(&a,300,245,now+12u); CHECK(!a.ui.vision_page && !a.ui.motor_page);
+    for(now+=14u;now<6000u;++now) app_step(&a,now);
+    CHECK(!bad_layout && !app_motor.count && strstr(lines[0],"QR"));
+    puts("PASS: vision screen, parameters, SCAN/STOP and BACK without motor actions");
+}
 int main(int argc,char **argv)
 {
+    if(argc>1 && !strcmp(argv[1],"vision-screen")) { test_vision_screen(); return 0; }
     if(argc>1 && !strcmp(argv[1],"chassis-active")) { test_chassis_active(); return 0; }
     if(argc>1 && !strcmp(argv[1],"review-parallel")) { test_review_parallel(); return 0; }
     if(argc>1 && !strcmp(argv[1],"review-ui")) { test_review_ui(); return 0; }

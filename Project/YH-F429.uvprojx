@@ -10,7 +10,7 @@
       <TargetName>LCD</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>5060960::V5.06 update 7 (build 960)::.\ARMCC</pCCUsed>
+      <pCCUsed>5060960::5.06 update 7 (build 960)::.\ARMCC</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
@@ -942,6 +942,31 @@
               <FileName>readme.txt</FileName>
               <FileType>5</FileType>
               <FilePath>..\Doc\readme.txt</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>VISION</GroupName>
+          <Files>
+            <File>
+              <FileName>vision_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vision\vision_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vision\vision_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>vision_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\vision\vision_ui.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_vision_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\usart\bsp_vision_uart.c</FilePath>
             </File>
           </Files>
         </Group>

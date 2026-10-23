@@ -10,6 +10,7 @@
 #include "./usart/bsp_qr_uart.h"
 #include "./usart/bsp_qr_trigger.h"
 #include "./usart/bsp_motor_uart.h"
+#include "./usart/bsp_vision_uart.h"
 #include "./motor/motor_test_config.h"
 #include <string.h>
 
@@ -88,6 +89,8 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
     Gyro_Init(&a->gyro, BspGyroBus_Io(), now);
     Chassis_Init(&a->chassis,&a->motor,0,now);
     a->ui.chassis=&a->chassis;
+    VisionService_Init(&a->vision,BspVisionUart_Init(),now);
+    a->ui.vision=&a->vision;
 }
 /*
  * 给陀螺校准提供拒绝原因：活动、未知、未确认停止或无已知阻碍。
@@ -132,11 +135,17 @@ void QrApp_Process(QrApp *a, uint32_t now)
     QrUiAction action;
     BspMotorUart_PumpBus(&a->motor, now);
     MotorBus_Process(&a->motor, now);
+    BspVisionUart_Pump(&a->vision,now);
+    VisionService_Process(&a->vision,AppClock_Now());
     now = AppClock_Now(); Gyro_Process(&a->gyro, now, motor_active(a, now));
     AppTouch_Process(now); AppTouch_GetState(&x, &y, &down);
     now = AppClock_Now();
     action = QrUi_Touch(&a->ui, x, y, down);
-    if (action == QR_UI_RESCAN)
+    if (action==QR_UI_VISION_SCAN) {
+        (void)VisionService_Start(&a->vision,a->ui.vision_mode,a->ui.vision_color,
+            a->ui.vision_zone,a->ui.vision_position,(uint16_t)(a->vision.pose_id+1u),now);
+    } else if (action==QR_UI_VISION_STOP) VisionService_Stop(&a->vision,now);
+    else if (action == QR_UI_RESCAN)
         BspQrUart_BeginSession(&a->qr, now);
     else if (action==QR_UI_CHASSIS_START) (void)Chassis_StartAcceptance(&a->chassis,now);
     else if ((action==QR_UI_FLOW_CLEAR || action==QR_UI_GYRO_CAL || action==QR_UI_GYRO_ZERO) &&
@@ -149,7 +158,10 @@ void QrApp_Process(QrApp *a, uint32_t now)
     } else if (action == QR_UI_GYRO_ZERO) {
         (void)Gyro_ZeroAngle(&a->gyro, now);
     } else if (action==QR_UI_MODE || action==QR_UI_RUN || action==QR_UI_STOP_AXIS ||
-        action==QR_UI_STOP_WHEELS || action==QR_UI_STOP_ALL) manual_action(a, action, now);
+        action==QR_UI_STOP_WHEELS || action==QR_UI_STOP_ALL) {
+        manual_action(a, action, now);
+        if (action==QR_UI_STOP_ALL) VisionService_Stop(&a->vision,now);
+    }
     BspQrTrigger_Poll(now);
     BspQrUart_Pump(&a->qr, now);
     now = AppClock_Now(); /* Capture IRQs/touch I2C can advance SysTick during a step. */

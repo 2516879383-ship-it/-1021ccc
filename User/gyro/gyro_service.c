@@ -47,6 +47,7 @@ static void fault(GyroService *s,int r,uint32_t now)
     gap(s,chip_error(r)); s->data.state=GYRO_ERROR;
     s->data.raw_valid=s->data.rate_valid=0u;
     s->data.bus_error=s->chip.bus_error; ++s->data.errors;
+    if (s->chip.bus_error!=GYRO_BUS_OK) s->data.last_bus_error=s->chip.bus_error;
     s->due=now+s->retry_ms;
     if (s->retry_ms<GYRO_RETRY_MAX_MS) s->retry_ms*=2u;
 }
@@ -188,7 +189,6 @@ static void process(GyroService *s,uint32_t now,uint8_t motor_active)
     }
     poll_dt=now-s->last_poll;
     if (poll_dt<GYRO_POLL_MS) return;
-    s->last_poll=now;
     if (poll_dt>d->max_poll_ms) d->max_poll_ms=poll_dt;
     /* With no FIFO a polling blackout of one ODR can hide a lost frame.
        Conservatively break continuity even if the next value looks plausible. */
@@ -199,8 +199,9 @@ static void process(GyroService *s,uint32_t now,uint8_t motor_active)
     if ((uint32_t)(now-s->last_check)>=GYRO_CHECK_MS) {
         s->last_check=now; r=Icm_Check(&s->chip,&s->io); d->who=s->chip.who;
         if (r<0) fault(s,r,s->io.millis(s->io.ctx));
-        return; /* <=1 config transaction; resume DRDY polling next step. */
+        return; /* No DRDY poll occurred; do not postpone the next fetch. */
     }
+    s->last_poll=now;
     r=Icm_Fetch(&s->chip,&s->io,raw,&at); d->bus_error=s->chip.bus_error;
     if (r==ICM_NO_DATA) return;
     if (r==ICM_INVALID || r==ICM_SATURATED) {

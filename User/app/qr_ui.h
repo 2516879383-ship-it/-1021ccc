@@ -30,6 +30,7 @@ typedef struct {
     const Mechanism *mechanism;
     const ServoDualState *servo;
     const Mission *mission;
+    const char *gyro_notice; /* Last rejected action; clear on next action/page change. */
     uint8_t servo_ready, servo_blocked;
     uint32_t last_draw, max_step_ms;
     uint16_t clear_y, strip, text_x, text_y;

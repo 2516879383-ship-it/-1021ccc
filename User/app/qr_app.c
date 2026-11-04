@@ -92,6 +92,10 @@ void QrApp_Process(QrApp *a, uint32_t now)
     AppTouch_Process(now); AppTouch_GetState(&x, &y, &down);
     now = AppClock_Now();
     action = QrUi_Touch(&a->ui, x, y, down);
+    if (action==QR_UI_GYRO_CAL || action==QR_UI_GYRO_ZERO) {
+        a->ui.gyro_notice=0;
+        a->ui.last_draw=now-100u; /* Refresh the notice without clearing the whole page. */
+    }
     if (action==QR_UI_MISSION_START) (void)Mission_Start(&a->mission,now);
     else if (action>=QR_UI_SERVO_JAW_ON && action<=QR_UI_SERVO_TABLE_OFF) {
         ServoDualAction cmd=(ServoDualAction)(action-QR_UI_SERVO_JAW_ON+DUAL_JAW_ON);
@@ -113,11 +117,17 @@ void QrApp_Process(QrApp *a, uint32_t now)
         (Chassis_OwnsWheels(&a->chassis) || Mechanism_OwnsAxes(&a->mechanism))) {
         a->motor.message=Mechanism_OwnsAxes(&a->mechanism) ? "MECHANISM BUSY" : "CHASSIS BUSY";
         a->chassis.data.rejection=CHASSIS_AXIS_BUSY;
+        if (action==QR_UI_GYRO_ZERO)
+            a->ui.gyro_notice=Mechanism_OwnsAxes(&a->mechanism) ? "ZERO REJECT: MECHANISM BUSY" : "ZERO REJECT: CHASSIS BUSY";
+        else
+            a->ui.gyro_notice=Mechanism_OwnsAxes(&a->mechanism) ? "CAL REJECT: MECHANISM BUSY" : "CAL REJECT: CHASSIS BUSY";
     }
     else if (action == QR_UI_GYRO_CAL) {
         (void)Gyro_RequestCalibration(&a->gyro, now, motor_active(a, now));
     } else if (action == QR_UI_GYRO_ZERO) {
-        (void)Gyro_ZeroAngle(&a->gyro, now);
+        if (!Gyro_ZeroAngle(&a->gyro, now))
+            a->ui.gyro_notice=a->gyro.data.calibration==GYRO_CAL_RUNNING ?
+                "ZERO REJECT: CAL IN PROGRESS" : "ZERO REJECT: DATA/CAL NOT READY";
     } else if (action==QR_UI_STOP_ALL) stop_all(a,now);
     BspQrTrigger_Poll(now);
     BspQrUart_Pump(&a->qr, now);

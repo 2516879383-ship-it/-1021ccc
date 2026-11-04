@@ -26,7 +26,7 @@ static UiWidget *item(QrUi *u,unsigned x,unsigned y,unsigned w,unsigned h,
 static void row(QrUi *u,unsigned index,const char *text)
 { (void)item(u,8u,44u+index*24u,464u,22u,0u,text); }
 static void open_page(QrUi *u,uint8_t page)
-{ u->page=page; u->more=0u; u->redraw=1u; }
+{ u->page=page; u->more=0u; u->redraw=1u; u->gyro_notice=0; }
 void QrUi_Init(QrUi *u)
 { memset(u,0,sizeof(*u)); u->redraw=1u; }
 static int hit(int32_t x,int32_t y,int32_t bx,int32_t by,int32_t w,int32_t h)
@@ -315,7 +315,7 @@ static void snapshot(QrUi *u,const QrService *q,const MotorBus *b,
     case UI_GYRO:
         for (i=1u;i<=(u->more ? 8u : 6u);++i) {
             GyroUi_Line(t,i,u->more,g);
-            row(u,i-1u,t);
+            row(u,i-1u,(!u->more && i==6u && u->gyro_notice) ? u->gyro_notice : t);
         }
         if (!u->more) {
             (void)item(u,8,196,140,30,1,/* 校准 */ "\346\240\241\345\207\206"); (void)item(u,160,196,140,30,1,/* 角度清零 */ "\350\247\222\345\272\246\346\270\205\351\233\266");

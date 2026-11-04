@@ -146,6 +146,7 @@ static void test_recovery_wrap_ui(void)
         m.failure=GYRO_BUS_OK; run(&s,&m,500u);
         CHECK(s.data.state==GYRO_RUNNING && s.data.raw_valid && !s.data.calibrated && !s.data.angle_valid);
         CHECK(!Gyro_ZeroAngle(&s,m.now));
+        CHECK(s.data.bus_error==GYRO_BUS_OK && s.data.last_bus_error==(GyroBusError)i);
     }
     setup(&s,&m,UINT32_MAX-2800u); cal(&s,&m); m.raw[GYRO_AXIS]=6550; run(&s,&m,20u);
     CHECK(Gyro_ZeroAngle(&s,m.now)); at=s.data.sample_ms; run(&s,&m,4000u);
@@ -189,9 +190,26 @@ static void test_startup_and_cal_bus_failure(void)
     m.corrupt_reg=0x7C; run(&s,&m,200u);
     CHECK(s.data.state==GYRO_ERROR && s.data.error==GYRO_CONFIG && !s.data.raw_valid);
 }
+static void test_visible_diagnostics(void)
+{
+    GyroSnapshot d={0}; char line[43];
+    d.state=GYRO_INIT; GyroUi_Line(line,6u,0u,&d); CHECK(strstr(line,"INIT:"));
+    d.state=GYRO_ERROR; d.error=GYRO_BUS; d.bus_error=GYRO_BUS_BUSY;
+    GyroUi_Line(line,6u,0u,&d); CHECK(!strcmp(line,"ERR:I2C BUS:BUSY"));
+    d.error=GYRO_RESET; d.bus_error=GYRO_BUS_TIMEOUT;
+    GyroUi_Line(line,6u,0u,&d); CHECK(!strcmp(line,"ERR:RESET/NO DRDY BUS:TIMEOUT"));
+    d.state=GYRO_RUNNING; d.error=GYRO_STALE; d.bus_error=GYRO_BUS_OK;
+    GyroUi_Line(line,6u,0u,&d); CHECK(!strcmp(line,"ERR:STALE BUS:OK"));
+    d.error=GYRO_OK; d.angle_gap=1u; d.last_fault=GYRO_GAP;
+    GyroUi_Line(line,6u,0u,&d); CHECK(!strcmp(line,"ERR:SAMPLE GAP BUS:OK"));
+    d.last_bus_error=GYRO_BUS_NACK;
+    GyroUi_Line(line,7u,1u,&d); CHECK(strstr(line,"LBUS:NACK"));
+    d.angle_gap=0u; d.have_sample=d.calibrated=1u; d.interval_ms=10u; d.age_ms=2u;
+    GyroUi_Line(line,6u,0u,&d); CHECK(!strcmp(line,"DT:10 AGE:2 ms"));
+}
 int main(void)
 {
-    test_chip(); test_service(); test_cal_failures(); test_recovery_wrap_ui(); test_startup_and_cal_bus_failure();
+    test_visible_diagnostics(); test_chip(); test_service(); test_cal_failures(); test_recovery_wrap_ui(); test_startup_and_cal_bus_failure();
     printf("GYRO PASS %u checks, axis %u sign %d, service %u bytes (host ABI)\n",checks,GYRO_AXIS,GYRO_SIGN,(unsigned)sizeof(GyroService));
     return 0;
 }

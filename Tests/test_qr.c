@@ -567,6 +567,22 @@ static void render_pages(void)
     a.motor.nodes[0].data.position_counts=INT64_MIN;
     a.motor.nodes[0].data.rx_count=a.motor.nodes[0].data.timeouts=UINT32_MAX;
     finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
+    /* Diagnostic rows stay above the buttons in the real renderer. */
+    a.ui.page=UI_GYRO; a.ui.more=0; a.ui.redraw=1;
+    g.state=GYRO_ERROR; g.error=g.last_fault=GYRO_BUS;
+    g.bus_error=g.last_bus_error=GYRO_BUS_NACK;
+    g.raw_valid=g.rate_valid=g.angle_valid=0;
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
+    CHECK(contains(&a.ui,"ERR:I2C BUS:NACK") && contains(&a.ui,"RATE:--")); save_image("ui_gyro_error.pgm");
+    g.state=GYRO_RUNNING; g.error=GYRO_OK; g.bus_error=GYRO_BUS_OK;
+    g.raw_valid=g.rate_valid=1; g.angle_gap=1; g.last_fault=GYRO_GAP; a.ui.redraw=1;
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
+    CHECK(contains(&a.ui,"ERR:SAMPLE GAP BUS:OK") && contains(&a.ui,"REL:--")); save_image("ui_gyro_gap.pgm");
+    a.ui.gyro_notice="ZERO REJECT: MECHANISM BUSY"; a.ui.redraw=1;
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui); save_image("ui_gyro_busy.pgm");
+    a.ui.more=1; a.ui.redraw=1;
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
+    CHECK(contains(&a.ui,"LBUS:NACK")); save_image("ui_gyro_recovery.pgm");
     CHECK(!bad_layout); puts("PASS: rendered all 20 page variants, bounds, extreme counts, phase priority and invalid coordinates");
 }
 static void gyro_ready(QrApp *a)
@@ -619,10 +635,19 @@ static void test_actions(void)
     press(&a,40,210); CHECK(a.chassis.data.request_id==request); /* no restart */
     press(&a,40,248); press(&a,200,120); zeros=a.gyro.data.zeros;
     press(&a,200,210); CHECK(a.gyro.data.zeros==zeros && a.chassis.data.rejection==CHASSIS_AXIS_BUSY);
+    CHECK(contains(&a.ui,"ZERO REJECT: CHASSIS BUSY")); validate_widgets(&a.ui);
+    press(&a,40,210); CHECK(contains(&a.ui,"CAL REJECT: CHASSIS BUSY"));
     /* Every module page exposes exactly the same global STOP hit area. */
     press(&a,420,248); advance(&a,1800u);
     CHECK(a.chassis.data.result==CHASSIS_CANCELLED && !a.motor.wheels_pending);
     for(i=0u;i<7u;++i) CHECK(!a.motor.nodes[i].stop_unconfirmed);
+    press(&a,200,210); CHECK(!a.ui.gyro_notice && a.gyro.data.zeros==zeros+1u);
+    CHECK(!contains(&a.ui,"REJECT:"));
+    GyroTest_Fail(1u); advance(&a,20u); press(&a,200,210);
+    CHECK(contains(&a.ui,"ZERO REJECT: DATA/CAL NOT READY"));
+    press(&a,40,248); press(&a,200,120); CHECK(!a.ui.gyro_notice);
+    CHECK(contains(&a.ui,"ERR:I2C BUS:NACK")); validate_widgets(&a.ui);
+    GyroTest_Fail(0u);
     CHECK(!bad_layout); puts("PASS: action edges, config gates, chassis START deduplication, gyro arbitration and seven-axis STOP");
     press(&a,40,248); press(&a,420,18); press(&a,40,210);
     CHECK(a.ui.page==UI_SERVO && a.ui.servo_ready);
@@ -651,14 +676,15 @@ static void test_actions(void)
     CHECK(!Servo_IsEnabled(0u) && !Servo_IsEnabled(1u));
 
 }
-static void test_timing(void)
+static void test_timing(unsigned last_page,unsigned phase_offset)
 {
     QrApp a; uint32_t start,next_scan,seq,stop_at,latency; unsigned i,before,pumps;
     CHECK(BspQrUart_Init()); app_fixture(&a,400000u); app_motor.online=MOTOR_ALL; gyro_ready(&a);
+    advance(&a,phase_offset);
     lcd_timed=trigger_measure=1u; trigger_have=0u; trigger_max_jitter=lcd_max_step=0u;
     /* Cancel incomplete draws repeatedly, then refresh changing data. */
     seq=a.gyro.data.sequence; pumps=motor_pumps; start=next_scan=tick;
-    for(i=0u;i<=UI_RACE;++i) {
+    for(i=0u;i<=last_page;++i) {
         a.ui.page=(uint8_t)i; a.ui.redraw=1u; advance(&a,25u);
     }
     while(tick-start<6000u) {
@@ -694,6 +720,9 @@ static void test_trial_boot(void)
     request=a.mechanism.data.request_id;
     press(&a,240,248); press(&a,420,18); press(&a,40,210);
     CHECK(a.mechanism.data.request_id==request && a.mechanism.data.rejection==MECH_AXIS_BUSY);
+    press(&a,40,248); press(&a,200,120); request=a.gyro.data.zeros;
+    press(&a,200,210); CHECK(a.gyro.data.zeros==request && contains(&a.ui,"ZERO REJECT: MECHANISM BUSY"));
+    press(&a,40,210); CHECK(contains(&a.ui,"CAL REJECT: MECHANISM BUSY")); validate_widgets(&a.ui);
     press(&a,420,248); advance(&a,1500u);
     CHECK(a.mechanism.data.result==MECH_CANCELLED && !a.mechanism.auto_pending && !a.mechanism.owned);
     CHECK(!a.servo.boot_pending && !Servo_IsEnabled(0u) && !Servo_IsEnabled(1u));
@@ -703,7 +732,10 @@ static void test_trial_boot(void)
 int main(int argc,char **argv)
 {
     if(argc>1 && !strcmp(argv[1],"render")) { render_pages(); return 0; }
-    if(argc>1 && !strcmp(argv[1],"timing")) { test_timing(); return 0; }
+    if(argc>1 && !strcmp(argv[1],"timing")) { test_timing(UI_RACE,0u); return 0; }
+    /* These phases hit the config-check slot that formerly deferred DRDY. */
+    if(argc>1 && !strcmp(argv[1],"timing-servo")) { test_timing(UI_SERVO,0u); return 0; }
+    if(argc>1 && !strcmp(argv[1],"timing-home")) { test_timing(UI_HOME,1u); return 0; }
     if(argc>1 && !strcmp(argv[1],"actions")) { test_actions(); return 0; }
 #if MECHANISM_TRIAL_RUN
     if(argc>1 && !strcmp(argv[1],"trial-boot")) { test_trial_boot(); return 0; }

@@ -14,7 +14,7 @@ typedef enum { GYRO_CAL_NONE, GYRO_CAL_RUNNING, GYRO_CAL_DONE,
     GYRO_CAL_GAP, GYRO_CAL_NOT_READY, GYRO_CAL_UNKNOWN, GYRO_CAL_STOP } GyroCalibration;
 enum { GYRO_MOTOR_NONE, GYRO_MOTOR_ACTIVE, GYRO_MOTOR_UNKNOWN, GYRO_MOTOR_STOP };
 typedef struct {
-    GyroState state; GyroError error, last_fault; GyroBusError bus_error;
+    GyroState state; GyroError error, last_fault; GyroBusError bus_error, last_bus_error;
     GyroCalibration calibration;
     int16_t raw[3];
     float raw_dps, bias_dps, rate_dps;

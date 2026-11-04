@@ -345,19 +345,19 @@ static int32_t touch_x,touch_y;
 static uint8_t touch_down;
 static unsigned touch_polls;
 void GTP_TouchProcess(void) { ++touch_polls; }
-static void finish_ui(QrUi *u,const QrService *q,const MotorBus *m,const FlowSnapshot *f,const GyroSnapshot *g,uint32_t now)
+static void finish_ui(QrUi *u,const QrService *q,const MotorBus *m,const GyroSnapshot *g,uint32_t now)
 {
     unsigned budget=4096u;
-    do { QrUi_Process(u,q,m,f,g,now); } while(u->drawing && --budget);
+    do { QrUi_Process(u,q,m,g,now); } while(u->drawing && --budget);
     CHECK(budget && u->count<=UI_WIDGETS);
 }
 static void app_step(QrApp *a,uint32_t now)
 {
     tick=now; AppTouch_Report(0,touch_x,touch_y,touch_down); QrApp_Process(a,now);
     if(!lcd_timed) {
-        FlowSnapshot f; GyroSnapshot g;
-        Flow_GetSnapshot(&a->flow,tick,&f); Gyro_GetSnapshot(&a->gyro,tick,&g);
-        finish_ui(&a->ui,&a->qr,&a->motor,&f,&g,tick);
+        GyroSnapshot g;
+        Gyro_GetSnapshot(&a->gyro,tick,&g);
+        finish_ui(&a->ui,&a->qr,&a->motor,&g,tick);
     }
 }
 static void advance(QrApp *a,unsigned duration)
@@ -500,7 +500,7 @@ static void test_dashboard(void)
     for(i=0u;i<8u;++i) { press(&a,20,140); press(&a,20,184); press(&a,420,18); }
     CHECK(app_motor.count==before && !a.motor.manual);
     for(i=0u;i<6u;++i) {
-        static const uint8_t pages[]={UI_MOTOR,UI_GYRO,UI_QR,UI_FLOW,UI_VISION,UI_MECHANISM};
+        static const uint8_t pages[]={UI_MOTOR,UI_GYRO,UI_QR,UI_HOME,UI_VISION,UI_MECHANISM};
         press(&a,40,248); press(&a,40+(int)(i%3u)*158,120+(int)(i/3u)*62);
         CHECK(a.ui.page==pages[i]); validate_widgets(&a.ui);
         press(&a,420,18); CHECK(a.ui.more); validate_widgets(&a.ui);
@@ -525,8 +525,8 @@ static void test_dashboard(void)
 }
 static void render_pages(void)
 {
-    QrApp a; FlowSnapshot f={0}; GyroSnapshot g={0}; unsigned page,more,i;
-    static const char * const names[]={"home","motor","gyro","qr","flow","vision","chassis","arm","limits","servo","race"};
+    QrApp a; GyroSnapshot g={0}; unsigned page,more,i;
+    static const char * const names[]={"home","motor","gyro","qr","vision","chassis","arm","limits","servo","race"};
     app_fixture(&a,200000u); receive(&a.qr,"156+123+516+231\r",tick);
     a.mechanism.auto_pending=0u;
     for(i=0u;i<7u;++i) {
@@ -536,7 +536,6 @@ static void render_pages(void)
     }
     g.state=GYRO_RUNNING; g.calibrated=g.rate_valid=g.angle_valid=g.raw_valid=g.have_sample=1u;
     g.axis=2; g.sign=1; g.angle_deg=-12.34; g.raw_dps=15.86f; g.bias_dps=15.86f;
-    f.state=FLOW_ERROR; f.error=FLOW_SPI; /* failed sensor is visible, never used for chassis */
     a.chassis.odometry.valid=1; a.chassis.odometry.x=123.45; a.chassis.odometry.y=-67.89;
     a.chassis.odometry.angle=-12.34; a.chassis.odometry.sample_ms=tick;
     a.mechanism.data.reference[0]=a.mechanism.data.reference[1]=MECH_HOMED;
@@ -546,7 +545,7 @@ static void render_pages(void)
     a.mechanism.data.limit[0].raw=a.mechanism.data.limit[0].stable=1u;
     for(page=0u;page<=UI_RACE;++page) for(more=0u;more<2u;++more) {
         char name[64]; a.ui.page=(uint8_t)page; a.ui.more=(uint8_t)more; a.ui.redraw=1;
-        finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); validate_widgets(&a.ui);
+        finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
         snprintf(name,sizeof(name),"ui_%s%s.pgm",names[page],more ? "_more" : ""); save_image(name);
         if(page==UI_CHASSIS && !more) CHECK(contains(&a.ui,"123.45") && contains(&a.ui,"-67.89"));
         if(page==UI_MECHANISM && !more) CHECK(contains(&a.ui,"45.25") && contains(&a.ui,"-1.25"));
@@ -555,20 +554,20 @@ static void render_pages(void)
     }
     a.ui.page=UI_HOME; a.ui.more=0; a.ui.redraw=1;
     a.mechanism.owned=1; a.mechanism.data.homing=1;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); CHECK(contains(&a.ui,"\346\234\272\346\236\204\345\233\236\351\233\266\344\270\255"));
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); CHECK(contains(&a.ui,"\346\234\272\346\236\204\345\233\236\351\233\266\344\270\255"));
     a.mechanism.data.stop_pending=1; a.ui.redraw=1;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); CHECK(contains(&a.ui,"\345\201\234\350\275\246\347\241\256\350\256\244\344\270\255"));
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); CHECK(contains(&a.ui,"\345\201\234\350\275\246\347\241\256\350\256\244\344\270\255"));
     a.mechanism.data.stop_pending=0; a.mechanism.owned=0; a.chassis.data.state=CHASSIS_FAULT; a.ui.redraw=1;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); CHECK(contains(&a.ui,"\346\225\205\351\232\234\345\276\205\345\244\204\347\220\206"));
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); CHECK(contains(&a.ui,"\346\225\205\351\232\234\345\276\205\345\244\204\347\220\206"));
     a.ui.page=UI_CHASSIS; a.chassis.odometry.valid=0; a.ui.redraw=1;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); CHECK(!contains(&a.ui,"123.45") && contains(&a.ui,"INVALID"));
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); CHECK(!contains(&a.ui,"123.45") && contains(&a.ui,"INVALID"));
     a.ui.page=UI_MECHANISM; a.mechanism.data.reference[0]=MECH_UNREFERENCED; a.ui.redraw=1;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); CHECK(!contains(&a.ui,"45.25"));
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); CHECK(!contains(&a.ui,"45.25"));
     a.ui.page=UI_MOTOR; a.ui.more=1; a.ui.redraw=1;
     a.motor.nodes[0].data.position_counts=INT64_MIN;
     a.motor.nodes[0].data.rx_count=a.motor.nodes[0].data.timeouts=UINT32_MAX;
-    finish_ui(&a.ui,&a.qr,&a.motor,&f,&g,tick); validate_widgets(&a.ui);
-    CHECK(!bad_layout); puts("PASS: rendered all 22 page variants, bounds, extreme counts, phase priority and invalid coordinates");
+    finish_ui(&a.ui,&a.qr,&a.motor,&g,tick); validate_widgets(&a.ui);
+    CHECK(!bad_layout); puts("PASS: rendered all 20 page variants, bounds, extreme counts, phase priority and invalid coordinates");
 }
 static void gyro_ready(QrApp *a)
 {
@@ -580,7 +579,7 @@ static void gyro_ready(QrApp *a)
 }
 static void test_actions(void)
 {
-    QrApp a; uint32_t request,session,zeros,clears_before; unsigned i,before;
+    QrApp a; uint32_t request,session,zeros; unsigned i,before;
     CHECK(BspQrUart_Init()); app_fixture(&a,300000u); app_motor.online=MOTOR_ALL; gyro_ready(&a);
     zeros=a.gyro.data.zeros; press(&a,200,210); CHECK(a.gyro.data.zeros==zeros+1u);
     {
@@ -599,8 +598,12 @@ static void test_actions(void)
     press(&a,40,248); press(&a,350,120); session=a.qr.data.session;
     touch_x=479-40; touch_y=271-210; touch_down=1; advance(&a,30u);
     CHECK(a.qr.data.session==session+1u); touch_down=0; advance(&a,1u);
-    press(&a,40,248); press(&a,40,180); clears_before=a.flow.data.clears;
-    press(&a,40,210); CHECK(a.flow.data.clears==clears_before+1u);
+    /* Placeholder clicks, including the old CLEAR area, cannot open a page or act. */
+    press(&a,40,248); before=app_motor.count; session=a.qr.data.session;
+    request=a.mechanism.data.request_id;
+    press(&a,40,180); press(&a,40,210);
+    CHECK(a.ui.page==UI_HOME && !a.ui.more && contains(&a.ui,"\351\274\240\346\240\207\344\275\215\347\247\273\346\250\241\345\235\227"));
+    CHECK(app_motor.count==before && a.qr.data.session==session && a.mechanism.data.request_id==request);
     press(&a,240,248); request=a.mechanism.data.request_id;
     press(&a,40,210); CHECK(a.mechanism.data.request_id==request); /* overview has no motion controls */
     press(&a,420,18); press(&a,40,210); CHECK(a.mechanism.data.rejection==MECH_CONFIG);
@@ -655,7 +658,7 @@ static void test_timing(void)
     lcd_timed=trigger_measure=1u; trigger_have=0u; trigger_max_jitter=lcd_max_step=0u;
     /* Cancel incomplete draws repeatedly, then refresh changing data. */
     seq=a.gyro.data.sequence; pumps=motor_pumps; start=next_scan=tick;
-    for(i=0u;i<9u;++i) {
+    for(i=0u;i<=UI_RACE;++i) {
         a.ui.page=(uint8_t)i; a.ui.redraw=1u; advance(&a,25u);
     }
     while(tick-start<6000u) {

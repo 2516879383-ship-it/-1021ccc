@@ -1,11 +1,10 @@
 ﻿/*
- * 应用编排层：串联七电机总线、扫码、触摸、光流、陀螺与统一界面。
+ * 应用编排层：串联七电机总线、扫码、触摸、陀螺与统一界面。
  * 本层负责把按键意图分发给服务，并在耗时步骤之间重新读取时钟、服务陀螺；
  * 协议解析、硬件恢复和绘图细节分别由对应模块维护。
  */
 #include "qr_app.h"
 #include "app_runtime.h"
-#include "./flow/bsp_flow_spi.h"
 #include "./gyro/bsp_gyro_bus.h"
 #include "./usart/bsp_qr_uart.h"
 #include "./usart/bsp_qr_trigger.h"
@@ -30,7 +29,6 @@ void QrApp_Init(QrApp *a, MotorTransport motor, uint8_t ready, uint32_t now)
 {
     MotorBus_Init(&a->motor, motor, now);
     QrService_Init(&a->qr, ready, now); QrUi_Init(&a->ui);
-    Flow_Init(&a->flow, BspFlowSpi_Io(), now);
     Gyro_Init(&a->gyro, BspGyroBus_Io(), now);
     Chassis_Init(&a->chassis,&a->motor,0,now);
     a->ui.chassis=&a->chassis;
@@ -75,14 +73,13 @@ static uint8_t motor_active(const QrApp *a, uint32_t now)
 }
 /*
  * 主循环的一轮：接收电机字节并推进事务/底盘，处理触摸动作，
- * 更新扫码触发与解码、光流和陀螺，最后提交快照并推进一个绘图片段。
+ * 更新扫码触发与解码和陀螺，最后提交快照并推进一个绘图片段。
  * 在触摸、传感器、绘图前后刷新 AppClock，避免沿用已过时的时间；
  * 多次调用 Gyro_Process 由其内部轮询间隔限频，不会把同一样本重复积分。
  */
 void QrApp_Process(QrApp *a, uint32_t now)
 {
     int32_t x, y;
-    FlowSnapshot flow;
     GyroSnapshot gyro;
     uint8_t down;
     QrUiAction action;
@@ -117,7 +114,6 @@ void QrApp_Process(QrApp *a, uint32_t now)
         a->motor.message=Mechanism_OwnsAxes(&a->mechanism) ? "MECHANISM BUSY" : "CHASSIS BUSY";
         a->chassis.data.rejection=CHASSIS_AXIS_BUSY;
     }
-    else if (action == QR_UI_FLOW_CLEAR) Flow_ResetTotals(&a->flow);
     else if (action == QR_UI_GYRO_CAL) {
         (void)Gyro_RequestCalibration(&a->gyro, now, motor_active(a, now));
     } else if (action == QR_UI_GYRO_ZERO) {
@@ -127,7 +123,6 @@ void QrApp_Process(QrApp *a, uint32_t now)
     BspQrUart_Pump(&a->qr, now);
     now = AppClock_Now(); /* Capture IRQs/touch I2C can advance SysTick during a step. */
     QrService_Process(&a->qr, now);
-    Flow_Process(&a->flow, now);
     if (a->ui.servo_ready) {
         uint8_t homed=(uint8_t)(a->mechanism.data.homing && a->mechanism.data.result==MECH_SUCCESS &&
             a->mechanism.data.reference[0]==MECH_HOMED && a->mechanism.data.reference[1]==MECH_HOMED &&
@@ -142,11 +137,10 @@ void QrApp_Process(QrApp *a, uint32_t now)
     now = AppClock_Now();
     Gyro_Process(&a->gyro, now, motor_active(a, now));
     now = AppClock_Now();
-    Flow_GetSnapshot(&a->flow, now, &flow);
     Gyro_GetSnapshot(&a->gyro, now, &gyro);
     Chassis_Process(&a->chassis,&gyro,now);
     now = AppClock_Now();
-    QrUi_Process(&a->ui, &a->qr, &a->motor, &flow, &gyro, now);
+    QrUi_Process(&a->ui, &a->qr, &a->motor, &gyro, now);
     if (AppClock_Now() - now > a->ui.max_step_ms) a->ui.max_step_ms = AppClock_Now() - now;
     now = AppClock_Now(); Gyro_Process(&a->gyro, now, motor_active(a, now));
 }

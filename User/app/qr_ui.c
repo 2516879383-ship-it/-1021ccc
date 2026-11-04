@@ -3,7 +3,6 @@
 #include "./lcd/bsp_lcd.h"
 #include "./lcd/lcd_orientation.h"
 #include "./fonts/ui_glyphs.h"
-#include "./flow/flow_ui.h"
 #include "./gyro/gyro_ui.h"
 #include "mission/mission_ui.h"
 #include <stdio.h>
@@ -12,7 +11,7 @@
 enum { DRAW_IDLE, DRAW_CLEAR, DRAW_WIDGET, DRAW_FILL, DRAW_TEXT };
 static const uint16_t nav_x[5]={8u,104u,200u,296u,384u};
 static const uint16_t nav_w[5]={88u,88u,88u,80u,88u};
-static const char * const titles[]={/* 运行总览 */ "\350\277\220\350\241\214\346\200\273\350\247\210",/* 电机状态 */ "\347\224\265\346\234\272\347\212\266\346\200\201",/* 陀螺仪 */ "\351\231\200\350\236\272\344\273\252",/* 扫码任务 */ "\346\211\253\347\240\201\344\273\273\345\212\241",/* 光流诊断 */ "\345\205\211\346\265\201\350\257\212\346\226\255",
+static const char * const titles[]={/* 运行总览 */ "\350\277\220\350\241\214\346\200\273\350\247\210",/* 电机状态 */ "\347\224\265\346\234\272\347\212\266\346\200\201",/* 陀螺仪 */ "\351\231\200\350\236\272\344\273\252",/* 扫码任务 */ "\346\211\253\347\240\201\344\273\273\345\212\241",
     /* 视觉通信 */ "\350\247\206\350\247\211\351\200\232\344\277\241",/* 底盘位置解算 */ "\345\272\225\347\233\230\344\275\215\347\275\256\350\247\243\347\256\227",/* 机械臂三轴 */ "\346\234\272\346\242\260\350\207\202\344\270\211\350\275\264",/* 限位开关 */ "\351\231\220\344\275\215\345\274\200\345\205\263","SERVO / PA6 + PC8","RACE / NOT CONNECTED"};
 
 static UiWidget *item(QrUi *u,unsigned x,unsigned y,unsigned w,unsigned h,
@@ -55,9 +54,10 @@ QrUiAction QrUi_Touch(QrUi *u,int32_t x,int32_t y,uint8_t down)
         return QR_UI_NONE;
     }
     if (u->page==UI_HOME && !u->more) {
-        static const uint8_t pages[]={UI_MOTOR,UI_GYRO,UI_QR,UI_FLOW,UI_VISION,UI_MECHANISM};
+        static const uint8_t pages[]={UI_MOTOR,UI_GYRO,UI_QR,UI_HOME,UI_VISION,UI_MECHANISM};
         for (i=0u;i<6u;++i) if (hit(x,y,8+(int)(i%3u)*158,104+(int)(i/3u)*62,148,52)) {
-            open_page(u,pages[i]); return QR_UI_NONE;
+            if (i!=3u) open_page(u,pages[i]); /* Mouse module has no page yet. */
+            return QR_UI_NONE;
         }
     } else if (u->page==UI_MOTOR) {
         if (!u->more) {
@@ -75,7 +75,6 @@ QrUiAction QrUi_Touch(QrUi *u,int32_t x,int32_t y,uint8_t down)
     else if (u->page==UI_GYRO && !u->more && hit(x,y,8,196,140,30)) return QR_UI_GYRO_CAL;
     else if (u->page==UI_GYRO && !u->more && hit(x,y,160,196,140,30)) return QR_UI_GYRO_ZERO;
     else if (u->page==UI_QR && !u->more && hit(x,y,8,196,216,30)) return QR_UI_RESCAN;
-    else if (u->page==UI_FLOW && !u->more && hit(x,y,8,196,216,30)) return QR_UI_FLOW_CLEAR;
     return QR_UI_NONE;
 }
 
@@ -108,7 +107,7 @@ static const char *phase(const QrUi *u,const MotorBus *b)
     if (m && (!m->data.reference[0] || !m->data.reference[1] || !m->data.trim_ready)) return /* 等待机构就绪 */ "\347\255\211\345\276\205\346\234\272\346\236\204\345\260\261\347\273\252";
     return /* 待机 */ "\345\276\205\346\234\272";
 }
-static void home(QrUi *u,const QrService *q,const MotorBus *b,const FlowSnapshot *f,
+static void home(QrUi *u,const QrService *q,const MotorBus *b,
     const GyroSnapshot *g,uint32_t now)
 {
     char t[UI_TEXT_BYTES],status[6][40]; unsigned i,online=0u,stops=0u;
@@ -140,10 +139,10 @@ static void home(QrUi *u,const QrService *q,const MotorBus *b,const FlowSnapshot
     snprintf(status[0],40,"%u/7 %s",online,stops ? "STOP?" : "ONLINE");
     snprintf(status[1],40,"%.12s",g ? Gyro_StateName(g) : "--");
     snprintf(status[2],40,"%s",q->data.valid ? "CODE LOCKED" : q->data.uart_ready ? "WAIT CODE" : "UART ERROR");
-    snprintf(status[3],40,"%.12s",f ? Flow_StateName(f) : "--"); strcpy(status[4],"NOT LINKED");
+    strcpy(status[3],"NOT LINKED"); strcpy(status[4],"NOT LINKED");
     snprintf(status[5],40,"%.12s",u->mechanism ? Mechanism_StateName(u->mechanism->data.state) : "--");
     for (i=0u;i<6u;++i) {
-        static const char * const names[]={/* 电机 */ "\347\224\265\346\234\272",/* 陀螺仪 */ "\351\231\200\350\236\272\344\273\252",/* 扫码 */ "\346\211\253\347\240\201",/* 光流 */ "\345\205\211\346\265\201",/* 视觉 */ "\350\247\206\350\247\211",/* 机械臂 */ "\346\234\272\346\242\260\350\207\202"};
+        static const char * const names[]={/* 电机 */ "\347\224\265\346\234\272",/* 陀螺仪 */ "\351\231\200\350\236\272\344\273\252",/* 扫码 */ "\346\211\253\347\240\201",/* 鼠标位移模块 */ "\351\274\240\346\240\207\344\275\215\347\247\273\346\250\241\345\235\227",/* 视觉 */ "\350\247\206\350\247\211",/* 机械臂 */ "\346\234\272\346\242\260\350\207\202"};
         snprintf(t,sizeof(t),"%s\n%s",names[i],status[i]);
         (void)item(u,8u+(i%3u)*158u,104u+(i/3u)*62u,148u,52u,1u,t);
     }
@@ -287,13 +286,13 @@ static void servos(QrUi *u)
         u->servo && u->servo->last_status==SERVO_REJECT_STATE ? "TAP THAT SERVO ON FIRST" :
         "TABLE: 1240 / 1900 / 2600 us");
 }
-static void snapshot(QrUi *u,const QrService *q,const MotorBus *b,const FlowSnapshot *f,
+static void snapshot(QrUi *u,const QrService *q,const MotorBus *b,
     const GyroSnapshot *g,uint32_t now)
 {
     unsigned i; char t[43]; u->count=0u;
     (void)item(u,8,4,384,32,0,titles[u->page]);
     switch (u->page) {
-    case UI_HOME: home(u,q,b,f,g,now); break;
+    case UI_HOME: home(u,q,b,g,now); break;
     case UI_MOTOR: motors(u,b,now); break;
     case UI_QR: qr(u,q,now); break;
     case UI_CHASSIS: chassis(u,now); break;
@@ -313,14 +312,13 @@ static void snapshot(QrUi *u,const QrService *q,const MotorBus *b,const FlowSnap
         row(u,2u,/* 当前无任务阶段与视觉坐标回传 */ "\345\275\223\345\211\215\346\227\240\344\273\273\345\212\241\351\230\266\346\256\265\344\270\216\350\247\206\350\247\211\345\235\220\346\240\207\345\233\236\344\274\240");
         if (u->more) { row(u,4u,"USART1 PA9 / PA10 115200 8N1"); row(u,5u,/* 程序不会假报比赛就绪 */ "\347\250\213\345\272\217\344\270\215\344\274\232\345\201\207\346\212\245\346\257\224\350\265\233\345\260\261\347\273\252"); }
         break;
-    default:
+    case UI_GYRO:
         for (i=1u;i<=(u->more ? 8u : 6u);++i) {
-            if (u->page==UI_GYRO) GyroUi_Line(t,i,u->more,g); else FlowUi_Line(t,i,u->more,f);
+            GyroUi_Line(t,i,u->more,g);
             row(u,i-1u,t);
         }
         if (!u->more) {
-            if (u->page==UI_GYRO) { (void)item(u,8,196,140,30,1,/* 校准 */ "\346\240\241\345\207\206"); (void)item(u,160,196,140,30,1,/* 角度清零 */ "\350\247\222\345\272\246\346\270\205\351\233\266"); }
-            else (void)item(u,8,196,216,30,1,/* 累计清零 */ "\347\264\257\350\256\241\346\270\205\351\233\266");
+            (void)item(u,8,196,140,30,1,/* 校准 */ "\346\240\241\345\207\206"); (void)item(u,160,196,140,30,1,/* 角度清零 */ "\350\247\222\345\272\246\346\270\205\351\233\266");
         }
         break;
     }
@@ -401,13 +399,13 @@ static void draw_step(QrUi *u)
     }
     if (!v->text[u->offset]) { strcpy(u->previous[u->widget],v->text); ++u->widget; u->drawing=DRAW_WIDGET; }
 }
-void QrUi_Process(QrUi *u,const QrService *q,const MotorBus *b,const FlowSnapshot *f,
+void QrUi_Process(QrUi *u,const QrService *q,const MotorBus *b,
     const GyroSnapshot *g,uint32_t now)
 {
     if (u->redraw || (!u->drawing && now-u->last_draw>=100u)) {
         if (u->redraw) { memset(u->previous,0,sizeof(u->previous)); u->clear_y=0u; u->drawing=DRAW_CLEAR; }
         else { u->widget=0u; u->drawing=DRAW_WIDGET; }
-        u->redraw=0u; u->last_draw=now; snapshot(u,q,b,f,g,now);
+        u->redraw=0u; u->last_draw=now; snapshot(u,q,b,g,now);
     }
     draw_step(u);
 }

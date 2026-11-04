@@ -16,7 +16,6 @@
   */
   
 #include "./flash/bsp_spi_flash.h"
-#include "./flow/bsp_flow_spi.h"
 
 SPI_HandleTypeDef SpiHandle;
 
@@ -32,14 +31,10 @@ static uint16_t SPI_TIMEOUT_UserCallback(uint8_t errorCode);
   * @param hspi: SPI handle pointer
   * @retval None
   */
-/*
- * 工程共享 SPI MSP 入口：SPI2 转交光流适配配置，SPI5 保留 Flash 配置；
- * 新增器件按实例分发，避免在不同模块重复定义 HAL_SPI_MspInit。
- */
+/* Only SPI5 Flash is active; the archived optical-flow SPI2 is not configured. */
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
 {
   GPIO_InitTypeDef  GPIO_InitStruct;
-  if (hspi->Instance == SPI2) { BspFlowSpi_MspInit(hspi); return; }
   if (hspi->Instance != SPI5) return;
   
   /*##-1- Enable peripherals and GPIO Clocks #################################*/

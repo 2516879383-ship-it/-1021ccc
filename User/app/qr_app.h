@@ -10,7 +10,7 @@
 #include "./motor/motor_bus.h"
 #include "./gyro/gyro_service.h"
 typedef struct {
-    MotorBus motor; QrService qr; QrUi ui; FlowService flow; GyroService gyro;
+    MotorBus motor; QrService qr; QrUi ui; GyroService gyro;
     Chassis chassis;
     Mechanism mechanism;
     ServoDualState servo;

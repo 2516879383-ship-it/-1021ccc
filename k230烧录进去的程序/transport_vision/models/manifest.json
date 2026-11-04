@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "models": [
+    {
+      "path": "transport_vision/models/colors.kmodel",
+      "bytes": 3048528,
+      "sha256": "437c4ea392055125a036319639329ca4e538811a454997d99f29ee331280ada3",
+      "labels": [
+        "black",
+        "deep blue",
+        "green",
+        "light blue",
+        "red",
+        "yellow"
+      ],
+      "ids": [
+        5,
+        3,
+        4,
+        6,
+        1,
+        2
+      ]
+    },
+    {
+      "path": "transport_vision/models/rings.kmodel",
+      "bytes": 3045032,
+      "sha256": "314bf8e5022ec12c53e955a3e5021933492f675129b2046f613253719a59ca94",
+      "labels": [
+        "圈1",
+        "圈2",
+        "圈3"
+      ],
+      "ids": [
+        1,
+        2,
+        3
+      ]
+    }
+  ]
+}

@@ -8,7 +8,7 @@
 #include <string.h>
 
 enum { DUAL_JAW = 0, DUAL_TABLE = 1 };
-static const ServoLimits jaw_limits={1700u,2430u,1700u,0u,0u};
+static const ServoLimits jaw_limits={1700u,2450u,1700u,0u,0u};
 /* User-recorded turntable pulse positions; actual position is not sensed. */
 #if defined(SERVO_DUAL_RUNTIME) && SERVO_DUAL_RUNTIME
 static const ServoLimits table_limits={1240u,2600u,1240u,0u,0u};

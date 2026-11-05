@@ -4,7 +4,7 @@
    and nominal 10 mm backoff. Revalidate after changing home or camera mount.
    Pulse output and successful positioning do not prove an object is held. */
 #define GROUND_PICK_LIFT_MM 130.0f
-#define GROUND_PICK_JAW_CLOSE_US 2430
+#define GROUND_PICK_JAW_CLOSE_US 2450
 #define GROUND_PICK_CENTER_X 646u
 #define GROUND_PICK_CENTER_Y 318u
 /* Preliminary visual alignment observations, 2026-11-05.
